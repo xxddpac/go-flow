@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GO-FLOW</title>
+    <script src="/static/react.production.min.js"></script>
+    <script src="/static/react-dom.production.min.js"></script>
+    <script src="/static/babel.min.js"></script>
+    <script src="/static/tailwind.min.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; }
+        .container { max-width: 1200px; margin: 0 auto; padding: 16px; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        th { background-color: #f4f4f4; }
+        tr:hover { background-color: #f5f5f5; }
+    </style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+    const { useState, useEffect } = React;
+
+    const Top10Table = () => {
+        const [data, setData] = useState([]);
+        const [error, setError] = useState(null);
+        const [loading, setLoading] = useState(false);
+
+        const fetchData = async () => {
+            setLoading(true);
+            try {
+                const response = await fetch('/top10', { cache: 'no-cache' });
+                if (!response.ok) {
+                    throw new Error(`HTTP error: ${response.status}`);
+                }
+                const json = await response.json();
+                setData(json);
+                setError(null);
+            } catch (err) {
+                setError(err.message);
+            } finally {
+                setLoading(false);
+            }
+        };
+
+        useEffect(() => {
+            fetchData();
+        }, []);
+
+        return (
+            <div className="container mx-auto p-4">
+                <div className="bg-white shadow-md rounded-lg p-6 relative">
+                    <div className="flex justify-between items-center mb-4">
+                        <h1 className="text-2xl font-bold">【GO-FLOW】 Ranks Top 10</h1>
+                        <button
+                            onClick={fetchData}
+                            disabled={loading}
+                            className={`p-2 rounded-full text-white focus:outline-none ${
+                                loading
+                                    ? 'bg-blue-300 cursor-not-allowed'
+                                    : 'bg-blue-500 hover:bg-blue-600'
+                            }`}
+                            title={loading ? 'Loading...' : 'Refresh Data'}
+                        >
+                            {loading ? (
+                                <svg
+                                    className="h-6 w-6 animate-spin"
+                                    xmlns="http://www.w3.org/2000/svg"
+                                    fill="none"
+                                    viewBox="0 0 24 24"
+                                    stroke="currentColor"
+                                >
+                                    <path
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                        strokeWidth={2}
+                                        d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"
+                                    />
+                                </svg>
+                            ) : (
+                                <svg
+                                    className="h-6 w-6"
+                                    xmlns="http://www.w3.org/2000/svg"
+                                    fill="none"
+                                    viewBox="0 0 24 24"
+                                    stroke="currentColor"
+                                >
+                                    <path
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                        strokeWidth={2}
+                                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                                    />
+                                </svg>
+                            )}
+                        </button>
+                    </div>
+                    {loading && (
+                        <div className="absolute inset-0 bg-gray-100 bg-opacity-50 flex items-center justify-center">
+                            <p className="text-gray-600 text-lg">Loading...</p>
+                        </div>
+                    )}
+                    {error && <p className="text-red-500 text-center">{error}</p>}
+                    {data.length === 0 && !error && !loading && <p className="text-center">Loading...</p>}
+                    {data.length > 0 && (
+                        <table className="min-w-full bg-white border">
+                            <thead>
+                            <tr className="bg-gray-200 text-gray-600 uppercase text-sm">
+                                <th className="py-2 px-4 border">Source IP</th>
+                                <th className="py-2 px-4 border">Dest IP</th>
+                                <th className="py-2 px-4 border">Src Port</th>
+                                <th className="py-2 px-4 border">Dest Port</th>
+                                <th className="py-2 px-4 border">Protocol</th>
+                                <th className="py-2 px-4 border">Bandwidth</th>
+                                <th className="py-2 px-4 border">Requests</th>
+                            </tr>
+                            </thead>
+                            <tbody>
+                            {data.map((item, index) => (
+                                <tr key={index} className="hover:bg-gray-100">
+                                    <td className="py-2 px-4 border">{item.ip}</td>
+                                    <td className="py-2 px-4 border">{item.dstIP}</td>
+                                    <td className="py-2 px-4 border">{item.srcPort}</td>
+                                    <td className="py-2 px-4 border">{item.dstPort}</td>
+                                    <td className="py-2 px-4 border">{item.protocol}</td>
+                                    <td className="py-2 px-4 border">{item.bandwidth.toFixed(2)} {item.unit}</td>
+                                    <td className="py-2 px-4 border">{item.requests}</td>
+                                </tr>
+                            ))}
+                            </tbody>
+                        </table>
+                    )}
+                </div>
+            </div>
+        );
+    };
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<Top10Table />);
+</script>
+</body>
+</html>

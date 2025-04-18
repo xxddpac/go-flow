@@ -2,22 +2,28 @@
 
 ## Overview
 
-go-flow is a real-time network traffic monitoring and DDoS detection tool that captures TCP/UDP packets and ranks the top 10
-IPs within a configurable sliding window
+go-flow is a lightweight, high-performance tool for real-time network traffic monitoring and DDoS detection. It captures TCP/UDP packets and analyzes within a configurable sliding time window.
 
 ## Usage
 
 ```
-chmod +x bin/go-flow
-./bin/go-flow --eth=<network interface> --size=<window size> default size = 5(minute)
+# For centos
+#Ensure libpcap installed
+# sudo yum install libpcap -y
+chmod +x go-flow
+./go-flow --eth=<network interface> --size=<window size>
 
+#--eth: Network interface to monitor (e.g., eth0 on CentOS, \Device\NPF_{...} on Windows).
+#--size: Sliding window size in minutes (default: 5).
+
+# For windows
+./go-flow.exe --eth=<network interface> --size=<window size>
 ```
 
 ## Example
 
 ```
-./bin/go-flow --eth=eth0
-
+./go-flow --eth=eth0
 # and then visit http://ip_address:31415
 
 ```
@@ -29,5 +35,17 @@ chmod +x bin/go-flow
 ## Build
 
 ```
-make build
+git clone https://github.com/xxddpac/go-flow.git
+cd go-flow
+
+# Build for CentOS
+make build-centos
+# Output: bin/go-flow
+
+# Build for Windows
+make build-win
+# Output: bin/go-flow.exe
+
+# Clean build artifacts
+make clean
 ```

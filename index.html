@@ -9,33 +9,79 @@
     <script src="/static/babel.min.js"></script>
     <script src="/static/tailwind.min.js"></script>
     <style>
-        body { font-family: Arial, sans-serif; }
-        .container { max-width: 1200px; margin: 0 auto; padding: 16px; }
-        table { width: 100%; border-collapse: collapse; }
-        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-        th { background-color: #f4f4f4; }
-        tr:hover { background-color: #f5f5f5; }
+        body {
+            font-family: Arial, sans-serif;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 16px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th, td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+
+        th {
+            background-color: #f4f4f4;
+        }
+
+        tr:hover {
+            background-color: #f5f5f5;
+        }
     </style>
 </head>
 <body>
 <div id="root"></div>
 <script type="text/babel">
-    const { useState, useEffect } = React;
+    const {useState, useEffect} = React;
 
-    const Top10Table = () => {
+    const TopTable = () => {
         const [data, setData] = useState([]);
+        const [timestamp, setTimestamp] = useState(0);
+        const [windowSize, setWindowSize] = useState(0);
+        const [rank, setRank] = useState(0);
         const [error, setError] = useState(null);
         const [loading, setLoading] = useState(false);
+        const formatDateTime = (unixSeconds) => {
+            const date = new Date(unixSeconds * 1000);
+            return date.toLocaleString('zh-CN', {
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit',
+                hour12: false
+            }).replace(/\//g, '-');
+        };
+        const getTimeRange = () => {
+            if (timestamp === 0 || windowSize === 0) return '';
+            const endTime = formatDateTime(timestamp);
+            const startTime = formatDateTime(timestamp - windowSize);
+            return `${startTime} - ${endTime}`;
+        };
 
         const fetchData = async () => {
             setLoading(true);
             try {
-                const response = await fetch('/top10', { cache: 'no-cache' });
+                const response = await fetch('/top', {cache: 'no-cache'});
                 if (!response.ok) {
                     throw new Error(`HTTP error: ${response.status}`);
                 }
                 const json = await response.json();
-                setData(json);
+                setData(json.Data || []);
+                setTimestamp(json.Timestamp || 0);
+                setWindowSize(json.WindowSize || 0);
+                setRank(json.Rank || 0);
                 setError(null);
             } catch (err) {
                 setError(err.message);
@@ -52,7 +98,7 @@
             <div className="container mx-auto p-4">
                 <div className="bg-white shadow-md rounded-lg p-6 relative">
                     <div className="flex justify-between items-center mb-4">
-                        <h1 className="text-2xl font-bold">【GO-FLOW】 Ranks Top 10</h1>
+                        <h1 className="text-2xl font-bold">【GO-FLOW】 Ranks Top {rank}</h1>
                         <button
                             onClick={fetchData}
                             disabled={loading}
@@ -96,13 +142,25 @@
                             )}
                         </button>
                     </div>
+                    {timestamp > 0 && windowSize > 0 && (
+                        <p className="text-xl font-semibold text-gray-700 bg-gray-100 p-3 rounded-md mb-4 flex items-center">
+                        <span
+                            className="inline-flex items-center bg-blue-500 text-white text-sm font-medium px-2.5 py-0.5 rounded-full mr-2 animate-pulse">
+                            <svg className="h-4 w-4 mr-1" xmlns="http://www.w3.org/2000/svg" fill="none"
+                                 viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                                      d="M13 10V3L4 14h7v7l9-11h-7z"/>
+                            </svg>
+                        </span>Current Time Range {getTimeRange()}
+                        </p>
+                    )}
                     {loading && (
                         <div className="absolute inset-0 bg-gray-100 bg-opacity-50 flex items-center justify-center">
                             <p className="text-gray-600 text-lg">Loading...</p>
                         </div>
                     )}
                     {error && <p className="text-red-500 text-center">{error}</p>}
-                    {data.length === 0 && !error && !loading && <p className="text-center">Loading...</p>}
+                    {data.length === 0 && !error && !loading && <p className="text-center">No data available</p>}
                     {data.length > 0 && (
                         <table className="min-w-full bg-white border">
                             <thead>
@@ -119,13 +177,13 @@
                             <tbody>
                             {data.map((item, index) => (
                                 <tr key={index} className="hover:bg-gray-100">
-                                    <td className="py-2 px-4 border">{item.ip}</td>
-                                    <td className="py-2 px-4 border">{item.dstIP}</td>
-                                    <td className="py-2 px-4 border">{item.srcPort}</td>
-                                    <td className="py-2 px-4 border">{item.dstPort}</td>
-                                    <td className="py-2 px-4 border">{item.protocol}</td>
-                                    <td className="py-2 px-4 border">{item.bandwidth.toFixed(2)} {item.unit}</td>
-                                    <td className="py-2 px-4 border">{item.requests}</td>
+                                    <td className="py-2 px-4 border">{item.IP}</td>
+                                    <td className="py-2 px-4 border">{item.DstIP}</td>
+                                    <td className="py-2 px-4 border">{item.SrcPort}</td>
+                                    <td className="py-2 px-4 border">{item.DstPort}</td>
+                                    <td className="py-2 px-4 border">{item.Protocol}</td>
+                                    <td className="py-2 px-4 border">{item.Bandwidth.toFixed(2)} {item.Unit}</td>
+                                    <td className="py-2 px-4 border">{item.Requests}</td>
                                 </tr>
                             ))}
                             </tbody>
@@ -135,8 +193,9 @@
             </div>
         );
     };
+
     const root = ReactDOM.createRoot(document.getElementById('root'));
-    root.render(<Top10Table />);
+    root.render(<TopTable/>);
 </script>
 </body>
 </html>

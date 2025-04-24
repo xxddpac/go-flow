@@ -1,18 +1,20 @@
 package main
 
 import (
-	"container/list"
+	"container/heap"
 	"context"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcap"
+	ji "github.com/json-iterator/go"
 	"github.com/xxddpac/async"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+	"hash/fnv"
 	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"os/signal"
 	"sort"
@@ -27,8 +29,9 @@ const (
 )
 
 var (
-	ctx    context.Context
-	cancel context.CancelFunc
+	ctx      context.Context
+	cancel   context.CancelFunc
+	syncPool = sync.Pool{New: func() interface{} { return &Traffic{} }}
 )
 
 func init() {
@@ -42,88 +45,206 @@ func (l Logger) Printf(format string, args ...interface{}) {
 }
 
 type Window struct {
-	queue *list.List
-	size  time.Duration
-	mu    sync.Mutex
+	shards   []*Shard
+	size     time.Duration
+	cache    []Traffic
+	cacheMu  sync.RWMutex
+	lastCalc time.Time
+	Rank     int
 }
 
-func NewWindow(size time.Duration) *Window {
-	return &Window{
-		queue: list.New(),
-		size:  size,
+type Shard struct {
+	mu      sync.Mutex
+	slices  map[int64]map[string]Traffic
+	ipStats map[string]Traffic
+	last    time.Time
+}
+
+func NewWindow(size time.Duration, shardCount, rank int) *Window {
+	w := &Window{
+		shards: make([]*Shard, shardCount),
+		size:   size,
+		Rank:   rank,
 	}
+	for i := range w.shards {
+		w.shards[i] = &Shard{
+			slices:  make(map[int64]map[string]Traffic),
+			ipStats: make(map[string]Traffic),
+			last:    time.Now(),
+		}
+	}
+	return w
 }
 
 func (w *Window) Add(traffic Traffic) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	w.queue.PushBack(traffic)
-	w.cleanup()
+	idx := fnv32(traffic.IP) % uint32(len(w.shards))
+	shard := w.shards[idx]
+	shard.mu.Lock()
+	defer shard.mu.Unlock()
+
+	ts := traffic.Timestamp.Unix()
+	if _, ok := shard.slices[ts]; !ok {
+		shard.slices[ts] = make(map[string]Traffic)
+	}
+	s := shard.slices[ts][traffic.IP]
+	s.IP = traffic.IP
+	s.DstIP = traffic.DstIP
+	s.SrcPort = traffic.SrcPort
+	s.DstPort = traffic.DstPort
+	s.Protocol = traffic.Protocol
+	s.Bytes += traffic.Bytes
+	s.Requests += traffic.Requests
+	shard.slices[ts][traffic.IP] = s
+
+	agg := shard.ipStats[traffic.IP]
+	agg.IP = traffic.IP
+	agg.DstIP = traffic.DstIP
+	agg.SrcPort = traffic.SrcPort
+	agg.DstPort = traffic.DstPort
+	agg.Protocol = traffic.Protocol
+	agg.Bytes += traffic.Bytes
+	agg.Requests += traffic.Requests
+	shard.ipStats[traffic.IP] = agg
 }
 
-func (w *Window) cleanup() {
-	now := time.Now()
-	cutoff := now.Add(-w.size)
-	for e := w.queue.Front(); e != nil; {
-		stats := e.Value.(Traffic)
-		if stats.Timestamp.Before(cutoff) {
-			next := e.Next()
-			w.queue.Remove(e)
-			e = next
-		} else {
-			break
+func (w *Window) cleanup(shard *Shard) {
+	shard.mu.Lock()
+	defer shard.mu.Unlock()
+	cutoff := time.Now().Add(-w.size).Unix()
+	for ts := range shard.slices {
+		if ts < cutoff {
+			for ip := range shard.slices[ts] {
+				agg := shard.ipStats[ip]
+				agg.Bytes -= shard.slices[ts][ip].Bytes
+				agg.Requests -= shard.slices[ts][ip].Requests
+				if agg.Bytes <= 0 {
+					delete(shard.ipStats, ip)
+				} else {
+					shard.ipStats[ip] = agg
+				}
+			}
+			delete(shard.slices, ts)
 		}
 	}
+	shard.last = time.Now()
+}
+
+func (w *Window) StartCleanup(ctx context.Context, wg *sync.WaitGroup) {
+	defer wg.Done()
+	ticker := time.NewTicker(time.Second)
+	for {
+		select {
+		case <-ticker.C:
+			for _, shard := range w.shards {
+				if time.Since(shard.last) > time.Second {
+					w.cleanup(shard)
+				}
+			}
+		case <-ctx.Done():
+			ticker.Stop()
+			return
+		}
+	}
+}
+
+func (w *Window) StartCacheUpdate(ctx context.Context, wg *sync.WaitGroup) {
+	defer wg.Done()
+	ticker := time.NewTicker(5 * time.Second)
+	for {
+		select {
+		case <-ticker.C:
+			result := w.Summary()
+			w.cacheMu.Lock()
+			w.cache = result
+			w.lastCalc = time.Now()
+			w.cacheMu.Unlock()
+		case <-ctx.Done():
+			ticker.Stop()
+			return
+		}
+	}
+}
+
+type TrafficHeap []Traffic
+
+func (h TrafficHeap) Len() int {
+	return len(h)
+}
+
+func (h TrafficHeap) Less(i, j int) bool {
+	return h[i].Bytes*getUnitFactor(h[i].Unit) < h[j].Bytes*getUnitFactor(h[j].Unit)
+}
+
+func (h TrafficHeap) Swap(i, j int) {
+	h[i], h[j] = h[j], h[i]
+}
+
+func (h *TrafficHeap) Push(x interface{}) {
+	*h = append(*h, x.(Traffic))
+}
+
+func (h *TrafficHeap) Pop() interface{} {
+	old := *h
+	n := len(old)
+	x := old[n-1]
+	*h = old[0 : n-1]
+	return x
 }
 
 func (w *Window) Summary() []Traffic {
-	w.mu.Lock()
-	defer w.mu.Unlock()
 	ipStats := make(map[string]Traffic)
-	now := time.Now()
-	cutoff := now.Add(-w.size)
-	for e := w.queue.Front(); e != nil; e = e.Next() {
-		stats := e.Value.(Traffic)
-		if stats.Timestamp.Before(cutoff) {
-			continue
+	for _, shard := range w.shards {
+		shard.mu.Lock()
+		for ip, s := range shard.ipStats {
+			agg := ipStats[ip]
+			agg.IP = s.IP
+			agg.DstIP = s.DstIP
+			agg.SrcPort = s.SrcPort
+			agg.DstPort = s.DstPort
+			agg.Protocol = s.Protocol
+			agg.Bytes += s.Bytes
+			agg.Requests += s.Requests
+			ipStats[ip] = agg
 		}
-		s := ipStats[stats.IP]
-		s.IP = stats.IP
-		s.DstIP = stats.DstIP
-		s.SrcPort = stats.SrcPort
-		s.DstPort = stats.DstPort
-		s.Protocol = stats.Protocol
-		s.Bytes += stats.Bytes
-		s.Requests += stats.Requests
-		ipStats[stats.IP] = s
+		shard.mu.Unlock()
 	}
-	result := make([]Traffic, 0, len(ipStats))
+
+	h := &TrafficHeap{}
+	heap.Init(h)
 	for _, s := range ipStats {
-		mb := s.Bytes * 8 / 1e6
+		mb := s.Bytes / 1e6
 		if mb >= 1000 {
 			s.Bytes = mb / 1000
-			s.Unit = "Gb"
+			s.Unit = "GB"
 		} else {
 			s.Bytes = mb
-			s.Unit = "Mb"
+			s.Unit = "MB"
 		}
-		result = append(result, s)
+		if h.Len() < w.Rank {
+			heap.Push(h, s)
+		} else if s.Bytes*getUnitFactor(s.Unit) > (*h)[0].Bytes*getUnitFactor((*h)[0].Unit) {
+			heap.Pop(h)
+			heap.Push(h, s)
+		}
+	}
+	result := make([]Traffic, h.Len())
+	for i := h.Len() - 1; i >= 0; i-- {
+		result[i] = heap.Pop(h).(Traffic)
 	}
 	sort.Slice(result, func(i, j int) bool {
 		return result[i].Bytes*getUnitFactor(result[i].Unit) > result[j].Bytes*getUnitFactor(result[j].Unit)
 	})
-	if len(result) > 10 {
-		result = result[:10]
-	}
 	return result
 }
 
 func (w *Window) ServeHTTP(wr http.ResponseWriter, r *http.Request) {
-	if r.URL.Path == "/top10" {
-		top10 := w.Summary()
-		response := make([]Top10Response, len(top10))
-		for i, s := range top10 {
-			response[i] = Top10Response{
+	if r.URL.Path == "/top" {
+		w.cacheMu.RLock()
+		top := w.cache
+		w.cacheMu.RUnlock()
+		resp := make([]TopItem, len(top))
+		for i, s := range top {
+			resp[i] = TopItem{
 				IP:        s.IP,
 				DstIP:     s.DstIP,
 				SrcPort:   s.SrcPort,
@@ -134,8 +255,14 @@ func (w *Window) ServeHTTP(wr http.ResponseWriter, r *http.Request) {
 				Requests:  s.Requests,
 			}
 		}
+		response := TopResponse{
+			Data:       resp,
+			Timestamp:  w.lastCalc.Unix(),
+			WindowSize: int(w.size.Seconds()),
+			Rank:       w.Rank,
+		}
 		wr.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(wr).Encode(response); err != nil {
+		if err := ji.NewEncoder(wr).Encode(response); err != nil {
 			http.Error(wr, "Failed to encode JSON", http.StatusInternalServerError)
 		}
 		return
@@ -144,10 +271,20 @@ func (w *Window) ServeHTTP(wr http.ResponseWriter, r *http.Request) {
 }
 
 func getUnitFactor(unit string) float64 {
-	if unit == "Gb" {
+	switch unit {
+	case "GB":
 		return 1000
+	case "MB":
+		return 1
+	default:
+		return 1
 	}
-	return 1
+}
+
+func fnv32(s string) uint32 {
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(s))
+	return h.Sum32()
 }
 
 type Traffic struct {
@@ -163,7 +300,7 @@ type Traffic struct {
 }
 
 func capture(ctx context.Context, device string, pool *async.WorkerPool, w *Window) {
-	handle, err := pcap.OpenLive(device, 1024, false, 30*time.Second)
+	handle, err := pcap.OpenLive(device, 2048, true, pcap.BlockForever)
 	if err != nil {
 		panic(err)
 	}
@@ -172,6 +309,20 @@ func capture(ctx context.Context, device string, pool *async.WorkerPool, w *Wind
 	if err = handle.SetBPFFilter("tcp or udp"); err != nil {
 		panic(err)
 	}
+	//go func() {
+	//	ticker := time.NewTicker(10 * time.Second)
+	//	for {
+	//		select {
+	//		case <-ctx.Done():
+	//			ticker.Stop()
+	//			return
+	//		case <-ticker.C:
+	//			stats, _ := handle.Stats()
+	//			zap.S().Infof("Packets: Received=%d, Dropped=%d, IfDropped=%d",
+	//				stats.PacketsReceived, stats.PacketsDropped, stats.PacketsIfDropped)
+	//		}
+	//	}
+	//}()
 	packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
 	ticker := time.NewTicker(time.Minute)
 	defer func() {
@@ -206,7 +357,8 @@ func capture(ctx context.Context, device string, pool *async.WorkerPool, w *Wind
 					return nil
 				}
 				packetLen := int64(pt.Metadata().Length)
-				stats := Traffic{
+				stats := syncPool.Get().(*Traffic)
+				*stats = Traffic{
 					Timestamp: time.Now(),
 					IP:        ipStr,
 					DstIP:     dstIP,
@@ -216,31 +368,40 @@ func capture(ctx context.Context, device string, pool *async.WorkerPool, w *Wind
 					Bytes:     float64(packetLen),
 					Requests:  1,
 				}
-				w.Add(stats)
+				w.Add(*stats)
+				syncPool.Put(stats)
 				return nil
 			}, packet)
 		case <-ticker.C:
-			// todo send high bandwidth traffic alert
 		case <-ctx.Done():
 			return
 		}
 	}
 }
 
-type Top10Response struct {
-	IP        string  `json:"ip"`
-	DstIP     string  `json:"dstIP"`
-	SrcPort   uint16  `json:"srcPort"`
-	DstPort   uint16  `json:"dstPort"`
-	Protocol  string  `json:"protocol"`
-	Bandwidth float64 `json:"bandwidth"`
-	Unit      string  `json:"unit"`
-	Requests  int64   `json:"requests"`
+type TopItem struct {
+	IP        string  `json:"IP"`
+	DstIP     string  `json:"DstIP"`
+	SrcPort   uint16  `json:"SrcPort"`
+	DstPort   uint16  `json:"DstPort"`
+	Protocol  string  `json:"Protocol"`
+	Bandwidth float64 `json:"Bandwidth"`
+	Unit      string  `json:"Unit"`
+	Requests  int64   `json:"Requests"`
+}
+
+type TopResponse struct {
+	Data       []TopItem `json:"Data"`
+	Timestamp  int64     `json:"Timestamp"`
+	WindowSize int       `json:"WindowSize"`
+	Rank       int       `json:"Rank"`
 }
 
 func main() {
 	eth := flag.String("eth", "", "Network interface")
 	size := flag.Int("size", 5, "Sliding window size")
+	workers := flag.Int("workers", 1000, "Number of workers")
+	rank := flag.Int("rank", 10, "Top Rank")
 	flag.Parse()
 
 	if *eth == "" {
@@ -249,17 +410,22 @@ func main() {
 		for _, iFace := range iFaces {
 			_, _ = fmt.Fprintf(os.Stderr, "- %s: %s\n", iFace.Name, iFace.Description)
 		}
+		os.Exit(1)
 	}
 
-	if *size <= 0 {
+	if *size <= 0 || *rank <= 0 || *workers <= 0 {
 		_, _ = fmt.Fprintln(os.Stderr, "Error: --size must be positive")
 		flag.Usage()
 		os.Exit(1)
 	}
 	var (
 		config = zap.NewProductionConfig()
-		pool   = async.New(async.WithLogger(Logger{}))
-		window = NewWindow(time.Duration(*size) * time.Minute)
+		pool   = async.New(
+			async.WithMaxWorkers(*workers),
+			async.WithMaxQueue(*workers*10),
+			async.WithLogger(Logger{}),
+		)
+		window = NewWindow(time.Duration(*size)*time.Minute, 16, *rank)
 	)
 	config.EncoderConfig.EncodeTime = zapcore.TimeEncoderOfLayout(timeLayout)
 	cb, _ := config.Build()
@@ -269,14 +435,25 @@ func main() {
 		pool.Close()
 		_ = cb.Sync()
 	}()
+
+	mux := http.NewServeMux()
+	mux.Handle("/", window)
+	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("static"))))
 	server := &http.Server{
 		Addr:    fmt.Sprintf(":%d", port),
-		Handler: nil,
+		Handler: mux,
 	}
-	http.Handle("/", window)
-	http.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("static"))))
-	pool.Wg.Add(2)
+
+	pool.Wg.Add(4)
+	go window.StartCleanup(ctx, &pool.Wg)
+	go window.StartCacheUpdate(ctx, &pool.Wg)
 	go capture(ctx, *eth, pool, window)
+	go func() {
+		defer pool.Wg.Done()
+		if err := http.ListenAndServe(fmt.Sprintf(":%d", port-1), nil); err != nil {
+			pool.Logger.Printf("pprof: %s", fmt.Sprintf("pprof err: %v", err))
+		}
+	}()
 	go func() {
 		defer pool.Wg.Done()
 		pool.Logger.Printf(fmt.Sprintf("HTTP server starting at port:%d", port))

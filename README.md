@@ -8,28 +8,30 @@ go-flow is a lightweight, high-performance tool for real-time network traffic mo
 
 ```
 # For centos
-#Ensure libpcap installed
+
+# Ensure libpcap installed
 # sudo yum install libpcap -y
 chmod +x go-flow
-./go-flow --eth=<network interface> --size=<window size>
-
-#--eth: Network interface to monitor (e.g., eth0 on CentOS, \Device\NPF_{...} on Windows).
-#--size: Sliding window size in minutes (default: 5).
+./go-flow --eth=<network interface>
 
 # For windows
-./go-flow.exe --eth=<network interface> --size=<window size>
+./go-flow.exe --eth=<network interface>
 ```
 
-## Example
-
+## Options
 ```
-./go-flow --eth=eth0
-# and then visit http://ip_address:31415
-
+--size int
+        Size of the sliding window in minutes (default 5)
+--workers int
+        Number of worker threads to process packets (default 1000)
+--rank int
+        Number of top IPs to display (default 10)
 ```
 
 ## Screenshot
-
+```
+http://ip_address:31415
+```
 <img src="gf.png" alt="">
 
 ## Build

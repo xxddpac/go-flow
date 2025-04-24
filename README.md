@@ -1,9 +1,7 @@
 # go-flow
 
 ## Overview
-
-go-flow is a lightweight, high-performance tool for real-time network traffic monitoring and DDoS detection. It captures TCP/UDP packets and analyzes within a configurable sliding time window.
-
+go-flow is a lightweight and efficient real-time network traffic monitoring tool, ideal for medium-scale traffic environments. It captures TCP/UDP packets and analyzes traffic using a configurable sliding time window. Designed for simplicity and performance, it also includes a built-in web UI for intuitive, real-time visualization.
 ## Usage
 
 ```

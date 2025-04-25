@@ -3,6 +3,7 @@ package main
 import (
 	"container/heap"
 	"context"
+	"embed"
 	"flag"
 	"fmt"
 	"github.com/google/gopacket"
@@ -14,7 +15,6 @@ import (
 	"go.uber.org/zap/zapcore"
 	"hash/fnv"
 	"net/http"
-	_ "net/http/pprof"
 	"os"
 	"os/signal"
 	"sort"
@@ -22,6 +22,10 @@ import (
 	"syscall"
 	"time"
 )
+
+//go:embed index.html
+//go:embed static/*
+var content embed.FS
 
 const (
 	timeLayout = "2006-01-02 15:04:05"
@@ -267,7 +271,17 @@ func (w *Window) ServeHTTP(wr http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	http.ServeFile(wr, r, "index.html")
+	if r.URL.Path == "/" {
+		file, err := content.ReadFile("index.html")
+		if err != nil {
+			http.Error(wr, "Failed to read index.html", http.StatusInternalServerError)
+			return
+		}
+		wr.Header().Set("Content-Type", "text/html")
+		_, _ = wr.Write(file)
+		return
+	}
+	http.FileServer(http.FS(content)).ServeHTTP(wr, r)
 }
 
 func getUnitFactor(unit string) float64 {
@@ -309,20 +323,6 @@ func capture(ctx context.Context, device string, pool *async.WorkerPool, w *Wind
 	if err = handle.SetBPFFilter("tcp or udp"); err != nil {
 		panic(err)
 	}
-	//go func() {
-	//	ticker := time.NewTicker(10 * time.Second)
-	//	for {
-	//		select {
-	//		case <-ctx.Done():
-	//			ticker.Stop()
-	//			return
-	//		case <-ticker.C:
-	//			stats, _ := handle.Stats()
-	//			zap.S().Infof("Packets: Received=%d, Dropped=%d, IfDropped=%d",
-	//				stats.PacketsReceived, stats.PacketsDropped, stats.PacketsIfDropped)
-	//		}
-	//	}
-	//}()
 	packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
 	ticker := time.NewTicker(time.Minute)
 	defer func() {
@@ -438,7 +438,6 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.Handle("/", window)
-	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("static"))))
 	server := &http.Server{
 		Addr:    fmt.Sprintf(":%d", port),
 		Handler: mux,
@@ -449,7 +448,6 @@ func main() {
 	go window.StartCacheUpdate(ctx, &pool.Wg)
 	go capture(ctx, *eth, pool, window)
 	go func() {
-		defer pool.Wg.Done()
 		if err := http.ListenAndServe(fmt.Sprintf(":%d", port-1), nil); err != nil {
 			pool.Logger.Printf("pprof: %s", fmt.Sprintf("pprof err: %v", err))
 		}

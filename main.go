@@ -13,7 +13,6 @@ import (
 	"github.com/xxddpac/async"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
-	"hash/fnv"
 	"net/http"
 	"os"
 	"os/signal"
@@ -48,127 +47,6 @@ func (l Logger) Printf(format string, args ...interface{}) {
 	zap.S().Infof(format, args...)
 }
 
-type Window struct {
-	shards   []*Shard
-	size     time.Duration
-	cache    []Traffic
-	cacheMu  sync.RWMutex
-	lastCalc time.Time
-	Rank     int
-}
-
-type Shard struct {
-	mu      sync.Mutex
-	slices  map[int64]map[string]Traffic
-	ipStats map[string]Traffic
-	last    time.Time
-}
-
-func NewWindow(size time.Duration, shardCount, rank int) *Window {
-	w := &Window{
-		shards: make([]*Shard, shardCount),
-		size:   size,
-		Rank:   rank,
-	}
-	for i := range w.shards {
-		w.shards[i] = &Shard{
-			slices:  make(map[int64]map[string]Traffic),
-			ipStats: make(map[string]Traffic),
-			last:    time.Now(),
-		}
-	}
-	return w
-}
-
-func (w *Window) Add(traffic Traffic) {
-	idx := fnv32(traffic.IP) % uint32(len(w.shards))
-	shard := w.shards[idx]
-	shard.mu.Lock()
-	defer shard.mu.Unlock()
-
-	ts := traffic.Timestamp.Unix()
-	if _, ok := shard.slices[ts]; !ok {
-		shard.slices[ts] = make(map[string]Traffic)
-	}
-	s := shard.slices[ts][traffic.IP]
-	s.IP = traffic.IP
-	s.DstIP = traffic.DstIP
-	s.SrcPort = traffic.SrcPort
-	s.DstPort = traffic.DstPort
-	s.Protocol = traffic.Protocol
-	s.Bytes += traffic.Bytes
-	s.Requests += traffic.Requests
-	shard.slices[ts][traffic.IP] = s
-
-	agg := shard.ipStats[traffic.IP]
-	agg.IP = traffic.IP
-	agg.DstIP = traffic.DstIP
-	agg.SrcPort = traffic.SrcPort
-	agg.DstPort = traffic.DstPort
-	agg.Protocol = traffic.Protocol
-	agg.Bytes += traffic.Bytes
-	agg.Requests += traffic.Requests
-	shard.ipStats[traffic.IP] = agg
-}
-
-func (w *Window) cleanup(shard *Shard) {
-	shard.mu.Lock()
-	defer shard.mu.Unlock()
-	cutoff := time.Now().Add(-w.size).Unix()
-	for ts := range shard.slices {
-		if ts < cutoff {
-			for ip := range shard.slices[ts] {
-				agg := shard.ipStats[ip]
-				agg.Bytes -= shard.slices[ts][ip].Bytes
-				agg.Requests -= shard.slices[ts][ip].Requests
-				if agg.Bytes <= 0 {
-					delete(shard.ipStats, ip)
-				} else {
-					shard.ipStats[ip] = agg
-				}
-			}
-			delete(shard.slices, ts)
-		}
-	}
-	shard.last = time.Now()
-}
-
-func (w *Window) StartCleanup(ctx context.Context, wg *sync.WaitGroup) {
-	defer wg.Done()
-	ticker := time.NewTicker(time.Second)
-	for {
-		select {
-		case <-ticker.C:
-			for _, shard := range w.shards {
-				if time.Since(shard.last) > time.Second {
-					w.cleanup(shard)
-				}
-			}
-		case <-ctx.Done():
-			ticker.Stop()
-			return
-		}
-	}
-}
-
-func (w *Window) StartCacheUpdate(ctx context.Context, wg *sync.WaitGroup) {
-	defer wg.Done()
-	ticker := time.NewTicker(5 * time.Second)
-	for {
-		select {
-		case <-ticker.C:
-			result := w.Summary()
-			w.cacheMu.Lock()
-			w.cache = result
-			w.lastCalc = time.Now()
-			w.cacheMu.Unlock()
-		case <-ctx.Done():
-			ticker.Stop()
-			return
-		}
-	}
-}
-
 type TrafficHeap []Traffic
 
 func (h TrafficHeap) Len() int {
@@ -195,23 +73,108 @@ func (h *TrafficHeap) Pop() interface{} {
 	return x
 }
 
-func (w *Window) Summary() []Traffic {
-	ipStats := make(map[string]Traffic)
-	for _, shard := range w.shards {
-		shard.mu.Lock()
-		for ip, s := range shard.ipStats {
-			agg := ipStats[ip]
-			agg.IP = s.IP
-			agg.DstIP = s.DstIP
-			agg.SrcPort = s.SrcPort
-			agg.DstPort = s.DstPort
-			agg.Protocol = s.Protocol
-			agg.Bytes += s.Bytes
-			agg.Requests += s.Requests
-			ipStats[ip] = agg
+type Traffic struct {
+	Timestamp time.Time
+	IP        string
+	DstIP     string
+	SrcPort   uint16
+	DstPort   uint16
+	Protocol  string
+	Bytes     float64
+	Requests  int64
+	Unit      string
+}
+
+type Bucket struct {
+	Timestamp int64
+	Stats     map[string]Traffic
+}
+
+type Window struct {
+	buckets  []*Bucket
+	size     time.Duration
+	bucketMu sync.RWMutex
+	ipStats  map[string]Traffic
+	statsMu  sync.RWMutex
+	cache    []Traffic
+	cacheMu  sync.RWMutex
+	lastCalc time.Time
+	Rank     int
+}
+
+func NewWindow(size time.Duration, rank int) *Window {
+	bucketCount := int(size / time.Minute)
+	buckets := make([]*Bucket, bucketCount)
+	for i := range buckets {
+		buckets[i] = &Bucket{
+			Timestamp: 0,
+			Stats:     make(map[string]Traffic),
 		}
-		shard.mu.Unlock()
 	}
+	return &Window{
+		buckets: buckets,
+		size:    size,
+		ipStats: make(map[string]Traffic),
+		Rank:    rank,
+	}
+}
+
+func (w *Window) Add(traffic Traffic) {
+	w.bucketMu.Lock()
+	now := time.Now()
+	idx := int(now.Unix()/60) % len(w.buckets)
+	bucket := w.buckets[idx]
+	bucketTs := now.Truncate(time.Minute).Unix()
+	if bucket.Timestamp != bucketTs {
+		bucket.Timestamp = bucketTs
+		bucket.Stats = make(map[string]Traffic)
+		w.statsMu.Lock()
+		for ip := range bucket.Stats {
+			if stat, ok := w.ipStats[ip]; ok {
+				stat.Bytes -= bucket.Stats[ip].Bytes
+				stat.Requests -= bucket.Stats[ip].Requests
+				if stat.Bytes <= 0 {
+					delete(w.ipStats, ip)
+				} else {
+					w.ipStats[ip] = stat
+				}
+			}
+		}
+		w.statsMu.Unlock()
+	}
+	s := bucket.Stats[traffic.IP]
+	s.IP = traffic.IP
+	s.DstIP = traffic.DstIP
+	s.SrcPort = traffic.SrcPort
+	s.DstPort = traffic.DstPort
+	s.Protocol = traffic.Protocol
+	s.Bytes += traffic.Bytes
+	s.Requests += traffic.Requests
+	bucket.Stats[traffic.IP] = s
+	w.bucketMu.Unlock()
+
+	w.statsMu.Lock()
+	agg := w.ipStats[traffic.IP]
+	agg.IP = traffic.IP
+	agg.DstIP = traffic.DstIP
+	agg.SrcPort = traffic.SrcPort
+	agg.DstPort = traffic.DstPort
+	agg.Protocol = traffic.Protocol
+	agg.Bytes += traffic.Bytes
+	agg.Requests += traffic.Requests
+	w.ipStats[traffic.IP] = agg
+	w.statsMu.Unlock()
+}
+
+func (w *Window) Summary() []Traffic {
+	w.statsMu.RLock()
+	ipStats := make(map[string]Traffic, len(w.ipStats))
+	for ip, s := range w.ipStats {
+		if s.Bytes > 0 {
+			ipStats[ip] = s
+		}
+	}
+	w.statsMu.RUnlock()
 
 	h := &TrafficHeap{}
 	heap.Init(h)
@@ -239,6 +202,24 @@ func (w *Window) Summary() []Traffic {
 		return result[i].Bytes*getUnitFactor(result[i].Unit) > result[j].Bytes*getUnitFactor(result[j].Unit)
 	})
 	return result
+}
+
+func (w *Window) StartCacheUpdate(ctx context.Context, wg *sync.WaitGroup) {
+	defer wg.Done()
+	ticker := time.NewTicker(5 * time.Second)
+	for {
+		select {
+		case <-ticker.C:
+			result := w.Summary()
+			w.cacheMu.Lock()
+			w.cache = result
+			w.lastCalc = time.Now()
+			w.cacheMu.Unlock()
+		case <-ctx.Done():
+			ticker.Stop()
+			return
+		}
+	}
 }
 
 func (w *Window) ServeHTTP(wr http.ResponseWriter, r *http.Request) {
@@ -295,24 +276,6 @@ func getUnitFactor(unit string) float64 {
 	}
 }
 
-func fnv32(s string) uint32 {
-	h := fnv.New32a()
-	_, _ = h.Write([]byte(s))
-	return h.Sum32()
-}
-
-type Traffic struct {
-	Timestamp time.Time
-	IP        string
-	DstIP     string
-	SrcPort   uint16
-	DstPort   uint16
-	Protocol  string
-	Bytes     float64
-	Requests  int64
-	Unit      string
-}
-
 func capture(ctx context.Context, device string, pool *async.WorkerPool, w *Window) {
 	handle, err := pcap.OpenLive(device, 2048, true, pcap.BlockForever)
 	if err != nil {
@@ -359,7 +322,7 @@ func capture(ctx context.Context, device string, pool *async.WorkerPool, w *Wind
 				packetLen := int64(pt.Metadata().Length)
 				stats := syncPool.Get().(*Traffic)
 				*stats = Traffic{
-					Timestamp: time.Now(),
+					Timestamp: pt.Metadata().Timestamp,
 					IP:        ipStr,
 					DstIP:     dstIP,
 					SrcPort:   srcPort,
@@ -373,6 +336,12 @@ func capture(ctx context.Context, device string, pool *async.WorkerPool, w *Wind
 				return nil
 			}, packet)
 		case <-ticker.C:
+			//todo high bandwidth alert
+			//for _,item := range w.cache {
+			//	if item.Bytes > 1000 {
+			//		pool.Logger.Printf("High bandwidth alert: %s %s %s %s %s", item.IP, item.DstIP, item.SrcPort, item.DstPort, item.Protocol)
+			//	}
+			//}
 		case <-ctx.Done():
 			return
 		}
@@ -425,7 +394,7 @@ func main() {
 			async.WithMaxQueue(*workers*10),
 			async.WithLogger(Logger{}),
 		)
-		window = NewWindow(time.Duration(*size)*time.Minute, 16, *rank)
+		window = NewWindow(time.Duration(*size)*time.Minute, *rank)
 	)
 	config.EncoderConfig.EncodeTime = zapcore.TimeEncoderOfLayout(timeLayout)
 	cb, _ := config.Build()
@@ -443,8 +412,7 @@ func main() {
 		Handler: mux,
 	}
 
-	pool.Wg.Add(4)
-	go window.StartCleanup(ctx, &pool.Wg)
+	pool.Wg.Add(3)
 	go window.StartCacheUpdate(ctx, &pool.Wg)
 	go capture(ctx, *eth, pool, window)
 	go func() {

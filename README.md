@@ -1,5 +1,7 @@
 # go-flow
 
+[中文文档（Chinese Docs）](https://github.com/xxddpac/go-flow/blob/main/README_ZH.md)
+
 ## Overview
 go-flow is a lightweight and efficient real-time network traffic monitoring tool, ideal for medium-scale traffic environments. It captures TCP/UDP packets and analyzes traffic using a configurable sliding time window. Designed for simplicity and performance, it also includes a built-in web UI for intuitive, real-time visualization.
 ## Usage

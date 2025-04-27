@@ -90,6 +90,10 @@ type Bucket struct {
 	Stats     map[string]Traffic
 }
 
+func getKey(ip, dstIP, protocol string, srcPort, dstPort uint16) string {
+	return fmt.Sprintf("%s|%s|%s|%d|%d", ip, dstIP, protocol, srcPort, dstPort)
+}
+
 type Window struct {
 	buckets  []*Bucket
 	size     time.Duration
@@ -120,29 +124,29 @@ func NewWindow(size time.Duration, rank int) *Window {
 }
 
 func (w *Window) Add(traffic Traffic) {
+	key := getKey(traffic.IP, traffic.DstIP, traffic.Protocol, traffic.SrcPort, traffic.DstPort)
 	w.bucketMu.Lock()
-	now := time.Now()
-	idx := int(now.Unix()/60) % len(w.buckets)
+	idx := int(traffic.Timestamp.Unix()/60) % len(w.buckets)
 	bucket := w.buckets[idx]
-	bucketTs := now.Truncate(time.Minute).Unix()
+	bucketTs := traffic.Timestamp.Truncate(time.Minute).Unix()
 	if bucket.Timestamp != bucketTs {
 		bucket.Timestamp = bucketTs
-		bucket.Stats = make(map[string]Traffic)
 		w.statsMu.Lock()
-		for ip := range bucket.Stats {
-			if stat, ok := w.ipStats[ip]; ok {
-				stat.Bytes -= bucket.Stats[ip].Bytes
-				stat.Requests -= bucket.Stats[ip].Requests
-				if stat.Bytes <= 0 {
-					delete(w.ipStats, ip)
+		for k := range bucket.Stats {
+			if stat, ok := w.ipStats[k]; ok {
+				stat.Bytes -= bucket.Stats[k].Bytes
+				stat.Requests -= bucket.Stats[k].Requests
+				if stat.Bytes <= 1e-6 {
+					delete(w.ipStats, k)
 				} else {
-					w.ipStats[ip] = stat
+					w.ipStats[k] = stat
 				}
 			}
 		}
+		bucket.Stats = make(map[string]Traffic)
 		w.statsMu.Unlock()
 	}
-	s := bucket.Stats[traffic.IP]
+	s := bucket.Stats[key]
 	s.IP = traffic.IP
 	s.DstIP = traffic.DstIP
 	s.SrcPort = traffic.SrcPort
@@ -150,11 +154,11 @@ func (w *Window) Add(traffic Traffic) {
 	s.Protocol = traffic.Protocol
 	s.Bytes += traffic.Bytes
 	s.Requests += traffic.Requests
-	bucket.Stats[traffic.IP] = s
+	bucket.Stats[key] = s
 	w.bucketMu.Unlock()
 
 	w.statsMu.Lock()
-	agg := w.ipStats[traffic.IP]
+	agg := w.ipStats[key]
 	agg.IP = traffic.IP
 	agg.DstIP = traffic.DstIP
 	agg.SrcPort = traffic.SrcPort
@@ -162,20 +166,19 @@ func (w *Window) Add(traffic Traffic) {
 	agg.Protocol = traffic.Protocol
 	agg.Bytes += traffic.Bytes
 	agg.Requests += traffic.Requests
-	w.ipStats[traffic.IP] = agg
+	w.ipStats[key] = agg
 	w.statsMu.Unlock()
 }
 
 func (w *Window) Summary() []Traffic {
 	w.statsMu.RLock()
 	ipStats := make(map[string]Traffic, len(w.ipStats))
-	for ip, s := range w.ipStats {
+	for k, s := range w.ipStats {
 		if s.Bytes > 0 {
-			ipStats[ip] = s
+			ipStats[k] = s
 		}
 	}
 	w.statsMu.RUnlock()
-
 	h := &TrafficHeap{}
 	heap.Init(h)
 	for _, s := range ipStats {
@@ -206,7 +209,7 @@ func (w *Window) Summary() []Traffic {
 
 func (w *Window) StartCacheUpdate(ctx context.Context, wg *sync.WaitGroup) {
 	defer wg.Done()
-	ticker := time.NewTicker(5 * time.Second)
+	ticker := time.NewTicker(2 * time.Second)
 	for {
 		select {
 		case <-ticker.C:
@@ -268,9 +271,9 @@ func (w *Window) ServeHTTP(wr http.ResponseWriter, r *http.Request) {
 func getUnitFactor(unit string) float64 {
 	switch unit {
 	case "GB":
-		return 1000
+		return 1e9
 	case "MB":
-		return 1
+		return 1e6
 	default:
 		return 1
 	}

@@ -1,5 +1,5 @@
 APP_NAME = go-flow
-SRC = main.go
+SRC = .
 BIN_DIR = bin
 BINARY_LINUX = $(BIN_DIR)/$(APP_NAME)
 BINARY_WIN = $(BIN_DIR)/$(APP_NAME).exe

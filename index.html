@@ -42,15 +42,17 @@
 <body>
 <div id="root"></div>
 <script type="text/babel">
-    const {useState, useEffect} = React;
+    const { useState, useEffect } = React;
 
-    const TopTable = () => {
+    const FlowTable = () => {
         const [data, setData] = useState([]);
         const [timestamp, setTimestamp] = useState(0);
         const [windowSize, setWindowSize] = useState(0);
         const [rank, setRank] = useState(0);
         const [error, setError] = useState(null);
         const [loading, setLoading] = useState(false);
+        const [tab, setTab] = useState('traffic');
+
         const formatDateTime = (unixSeconds) => {
             const date = new Date(unixSeconds * 1000);
             return date.toLocaleString('zh-CN', {
@@ -63,6 +65,7 @@
                 hour12: false
             }).replace(/\//g, '-');
         };
+
         const getTimeRange = () => {
             if (timestamp === 0 || windowSize === 0) return '';
             const endTime = formatDateTime(timestamp);
@@ -73,17 +76,36 @@
         const fetchData = async () => {
             setLoading(true);
             try {
-                const response = await fetch('/top', {cache: 'no-cache'});
+                const endpoint = tab === 'traffic' ? '/top' : '/ip_top';
+                const response = await fetch(endpoint, { cache: 'no-cache' });
                 if (!response.ok) {
                     throw new Error(`HTTP error: ${response.status}`);
                 }
                 const json = await response.json();
-                setData(json.Data || []);
-                setTimestamp(json.Timestamp || 0);
-                setWindowSize(json.WindowSize || 0);
-                setRank(json.Rank || 0);
+                const dataArray = tab === 'traffic' ? json.data : json;
+                if (!dataArray || !Array.isArray(dataArray)) {
+                    console.error(`Invalid or no data in ${endpoint} response:`, json);
+                    setData([]);
+                } else {
+                    const validData = dataArray.filter(item => {
+                        const isValid = tab === 'traffic'
+                            ? item.src_ip && item.dest_ip && item.dest_port !== undefined && item.protocol && item.bandwidth !== undefined && item.unit && item.requests !== undefined
+                            : item.ip && item.bytes !== undefined && item.requests !== undefined && item.unit;
+                        if (!isValid) {
+                            console.error(`Invalid item in ${endpoint} data:`, item);
+                        }
+                        return isValid;
+                    });
+                    setData(validData);
+                }
+                if (tab === 'traffic') {
+                    setTimestamp(json.timestamp || 0);
+                    setWindowSize(json.window_size || 0);
+                    setRank(json.rank || 0);
+                }
                 setError(null);
             } catch (err) {
+                console.error(`Fetch ${endpoint} error:`, err);
                 setError(err.message);
             } finally {
                 setLoading(false);
@@ -92,7 +114,7 @@
 
         useEffect(() => {
             fetchData();
-        }, []);
+        }, [tab]);
 
         return (
             <div className="container mx-auto p-4">
@@ -144,16 +166,40 @@
                     </div>
                     {timestamp > 0 && windowSize > 0 && (
                         <p className="text-xl font-semibold text-gray-700 bg-gray-100 p-3 rounded-md mb-4 flex items-center">
-                        <span
-                            className="inline-flex items-center bg-blue-500 text-white text-sm font-medium px-2.5 py-0.5 rounded-full mr-2 animate-pulse">
-                            <svg className="h-4 w-4 mr-1" xmlns="http://www.w3.org/2000/svg" fill="none"
-                                 viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                                      d="M13 10V3L4 14h7v7l9-11h-7z"/>
-                            </svg>
-                        </span>Current Time Range {getTimeRange()}
+                            <span
+                                className="inline-flex items-center bg-blue-500 text-white text-sm font-medium px-2.5 py-0.5 rounded-full mr-2 animate-pulse"
+                            >
+                                <svg className="h-4 w-4 mr-1" xmlns="http://www.w3.org/2000/svg" fill="none"
+                                     viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                                          d="M13 10V3L4 14h7v7l9-11h-7z"/>
+                                </svg>
+                            </span>
+                            Current Time Range {getTimeRange()}
                         </p>
                     )}
+                    <div className="flex space-x-4 mb-4">
+                        <button
+                            onClick={() => setTab('traffic')}
+                            className={`px-4 py-2 rounded-md font-semibold ${
+                                tab === 'traffic'
+                                    ? 'bg-blue-600 text-white'
+                                    : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                            }`}
+                        >
+                            Flows
+                        </button>
+                        <button
+                            onClick={() => setTab('ip')}
+                            className={`px-4 py-2 rounded-md font-semibold ${
+                                tab === 'ip'
+                                    ? 'bg-blue-600 text-white'
+                                    : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                            }`}
+                        >
+                            IPs
+                        </button>
+                    </div>
                     {loading && (
                         <div className="absolute inset-0 bg-gray-100 bg-opacity-50 flex items-center justify-center">
                             <p className="text-gray-600 text-lg">Loading...</p>
@@ -165,11 +211,14 @@
                         <table className="min-w-full bg-white border">
                             <thead>
                             <tr className="bg-gray-200 text-gray-600 uppercase text-sm">
-                                <th className="py-2 px-4 border">Source IP</th>
-                                <th className="py-2 px-4 border">Target IP</th>
-                                <th className="py-2 px-4 border">Source Port</th>
-                                <th className="py-2 px-4 border">Target Port</th>
-                                <th className="py-2 px-4 border">Protocol</th>
+                                <th className="py-2 px-4 border">{tab === 'traffic' ? 'Source IP' : 'IP'}</th>
+                                {tab === 'traffic' && (
+                                    <>
+                                        <th className="py-2 px-4 border">Target IP</th>
+                                        <th className="py-2 px-4 border">Target Port</th>
+                                        <th className="py-2 px-4 border">Protocol</th>
+                                    </>
+                                )}
                                 <th className="py-2 px-4 border">Bandwidth</th>
                                 <th className="py-2 px-4 border">Requests</th>
                             </tr>
@@ -177,13 +226,24 @@
                             <tbody>
                             {data.map((item, index) => (
                                 <tr key={index} className="hover:bg-gray-100">
-                                    <td className="py-2 px-4 border">{item.IP}</td>
-                                    <td className="py-2 px-4 border">{item.DstIP}</td>
-                                    <td className="py-2 px-4 border">{item.SrcPort}</td>
-                                    <td className="py-2 px-4 border">{item.DstPort}</td>
-                                    <td className="py-2 px-4 border">{item.Protocol}</td>
-                                    <td className="py-2 px-4 border">{item.Bandwidth.toFixed(2)} {item.Unit}</td>
-                                    <td className="py-2 px-4 border">{item.Requests}</td>
+                                    <td className="py-2 px-4 border">
+                                        {tab === 'traffic' ? (item.src_ip || 'N/A') : (item.ip || 'N/A')}
+                                    </td>
+                                    {tab === 'traffic' && (
+                                        <>
+                                            <td className="py-2 px-4 border">{item.dest_ip || 'N/A'}</td>
+                                            <td className="py-2 px-4 border">{item.dest_port !== undefined ? item.dest_port : 'N/A'}</td>
+                                            <td className="py-2 px-4 border">{item.protocol || 'N/A'}</td>
+                                        </>
+                                    )}
+                                    <td className="py-2 px-4 border">
+                                        {(tab === 'traffic' ? item.bandwidth : item.bytes) !== undefined
+                                            ? (tab === 'traffic' ? item.bandwidth : item.bytes).toFixed(2) + ' ' + (item.unit || 'N/A')
+                                            : 'N/A'}
+                                    </td>
+                                    <td className="py-2 px-4 border">
+                                        {item.requests !== undefined ? item.requests : 'N/A'}
+                                    </td>
                                 </tr>
                             ))}
                             </tbody>
@@ -195,7 +255,7 @@
     };
 
     const root = ReactDOM.createRoot(document.getElementById('root'));
-    root.render(<TopTable/>);
+    root.render(<FlowTable />);
 </script>
 </body>
 </html>

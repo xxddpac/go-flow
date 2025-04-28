@@ -32,8 +32,9 @@ chmod +x go-flow
 ```
 http://ip_address:31415
 ```
-<img src="gf.png" alt="">
+<img src="gf_flow.png" alt="">
 
+<img src="gf_ip.png" alt="">
 ## Build
 
 ```

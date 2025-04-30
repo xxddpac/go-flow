@@ -42,19 +42,19 @@ http://ip_address:31415
 
 - `Flows` show the top N flows detail in sliding window
 
-![Flows](/image/flows.jpg)
+![Flows](https://raw.githubusercontent.com/xxddpac/go-flow/main/image/flows.jpg)
 
 - `IPs` show the top N IPs use total bandwidth in sliding window
 
-![IPs](/image/ips.jpg)
+![IPs](https://raw.githubusercontent.com/xxddpac/go-flow/main/image/ips.jpg)
 
 - `Ports` show the top N Ports use total bandwidth in sliding window
 
-![Ports](/image/ports.jpg)
+![Ports](https://raw.githubusercontent.com/xxddpac/go-flow/main/image/ports.jpg)
 
 - `Trend` show the Trend of the bandwidth in sliding window
 
-![Trend](/image/trend.jpg)
+![Trend](https://raw.githubusercontent.com/xxddpac/go-flow/main/image/trend.jpg)
 
 ## Build
 

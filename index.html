@@ -37,21 +37,31 @@
         tr:hover {
             background-color: #f5f5f5;
         }
+
+        canvas {
+            width: 100%;
+            height: 400px;
+            border: 1px solid #e5e7eb;
+            border-radius: 4px;
+            background-color: #ffffff;
+        }
     </style>
 </head>
 <body>
 <div id="root"></div>
 <script type="text/babel">
-    const { useState, useEffect } = React;
+    const { useState, useEffect, useRef } = React;
 
     const FlowTable = () => {
         const [data, setData] = useState([]);
+        const [trendData, setTrendData] = useState([]);
         const [timestamp, setTimestamp] = useState(0);
         const [windowSize, setWindowSize] = useState(0);
         const [rank, setRank] = useState(0);
         const [error, setError] = useState(null);
         const [loading, setLoading] = useState(false);
         const [tab, setTab] = useState('traffic');
+        const canvasRef = useRef(null);
 
         const formatDateTime = (unixSeconds) => {
             const date = new Date(unixSeconds * 1000);
@@ -66,6 +76,14 @@
             }).replace(/\//g, '-');
         };
 
+        const formatTimeAxis = (unixSeconds) => {
+            const date = new Date(unixSeconds * 1000);
+            const hours = date.getHours().toString().padStart(2, '0');
+            const minutes = date.getMinutes().toString().padStart(2, '0');
+            const seconds = date.getSeconds().toString().padStart(2, '0');
+            return `${hours}:${minutes}:${seconds}`;
+        };
+
         const getTimeRange = () => {
             if (timestamp === 0 || windowSize === 0) return '';
             const endTime = formatDateTime(timestamp);
@@ -76,37 +94,66 @@
         const fetchData = async () => {
             setLoading(true);
             try {
-                const endpoint = tab === 'traffic' ? '/top' : '/ip_top';
-                const response = await fetch(endpoint, { cache: 'no-cache' });
-                if (!response.ok) {
-                    throw new Error(`HTTP error: ${response.status}`);
+                const topResponse = await fetch('/top', { cache: 'no-cache' });
+                if (!topResponse.ok) {
+                    throw new Error(`HTTP error from /top: ${topResponse.status}`);
                 }
-                const json = await response.json();
-                const dataArray = tab === 'traffic' ? json.data : json;
-                if (!dataArray || !Array.isArray(dataArray)) {
-                    console.error(`Invalid or no data in ${endpoint} response:`, json);
-                    setData([]);
-                } else {
-                    const validData = dataArray.filter(item => {
-                        const isValid = tab === 'traffic'
-                            ? item.src_ip && item.dest_ip && item.dest_port !== undefined && item.protocol && item.bandwidth !== undefined && item.unit && item.requests !== undefined
-                            : item.ip && item.bytes !== undefined && item.requests !== undefined && item.unit;
-                        if (!isValid) {
-                            console.error(`Invalid item in ${endpoint} data:`, item);
-                        }
-                        return isValid;
-                    });
-                    setData(validData);
-                }
+                const topJson = await topResponse.json();
+
+                setRank(topJson.rank || 0);
+                setTimestamp(topJson.timestamp || Math.floor(Date.now() / 1000));
+                setWindowSize(topJson.window_size || 3600);
+
+                let dataArray = [];
                 if (tab === 'traffic') {
-                    setTimestamp(json.timestamp || 0);
-                    setWindowSize(json.window_size || 0);
-                    setRank(json.rank || 0);
+                    dataArray = topJson.data || [];
+                } else if (tab === 'trend') {
+                    const response = await fetch('/trend', { cache: 'no-cache' });
+                    if (!response.ok) {
+                        throw new Error(`HTTP error from /trend: ${response.status}`);
+                    }
+                    const json = await response.json();
+                    dataArray = json.data || [];
+                    setTrendData(dataArray);
+                } else {
+                    const endpoint = tab === 'ip' ? '/ip_top' : '/stats/ports';
+                    const response = await fetch(endpoint, { cache: 'no-cache' });
+                    if (!response.ok) {
+                        throw new Error(`HTTP error from ${endpoint}: ${response.status}`);
+                    }
+                    const json = await response.json();
+                    dataArray = json || [];
                 }
+
+                if (tab !== 'trend') {
+                    if (!dataArray || !Array.isArray(dataArray)) {
+                        console.error(`Invalid or no data in response:`, dataArray);
+                        setData([]);
+                    } else {
+                        const validData = dataArray.filter(item => {
+                            let isValid;
+                            if (tab === 'traffic') {
+                                isValid = item.src_ip && item.dest_ip && item.dest_port !== undefined && item.protocol && item.bandwidth !== undefined && item.unit && item.requests !== undefined;
+                            } else if (tab === 'ip') {
+                                isValid = item.ip && item.bytes !== undefined && item.requests !== undefined && item.unit;
+                            } else {
+                                isValid = item.dest_port && item.protocol && item.bytes !== undefined && item.unit;
+                            }
+                            if (!isValid) {
+                                console.error(`Invalid item in ${tab} data:`, item);
+                            }
+                            return isValid;
+                        });
+                        setData(validData);
+                    }
+                }
+
                 setError(null);
             } catch (err) {
-                console.error(`Fetch ${endpoint} error:`, err);
+                console.error(`Fetch error:`, err);
                 setError(err.message);
+                setData([]);
+                if (tab === 'trend') setTrendData([]);
             } finally {
                 setLoading(false);
             }
@@ -115,6 +162,195 @@
         useEffect(() => {
             fetchData();
         }, [tab]);
+
+        useEffect(() => {
+            if (tab !== 'trend' || !canvasRef.current || trendData.length === 0) return;
+
+            const canvas = canvasRef.current;
+            const ctx = canvas.getContext('2d');
+            const dpr = window.devicePixelRatio || 1;
+            canvas.width = canvas.offsetWidth * dpr;
+            canvas.height = canvas.offsetHeight * dpr;
+            ctx.scale(dpr, dpr);
+
+            const width = canvas.offsetWidth;
+            const height = canvas.offsetHeight;
+            const padding = 50;
+            const paddingLeft = 80;
+
+            ctx.clearRect(0, 0, width, height);
+
+            const bytes = trendData.map(item => item.bytes);
+            const timestamps = trendData.map(item => item.timestamp);
+            const unit = trendData[0]?.unit || 'MB';
+            const minTimestamp = Math.min(...timestamps);
+
+            const maxBytes = Math.max(...bytes, 1);
+            const minBytes = Math.min(...bytes, 0);
+            const yRange = maxBytes - minBytes;
+            const yScale = (height - 2 * padding) / yRange;
+
+            const xStep = (width - paddingLeft - padding) / (trendData.length - 1);
+
+            // 绘制背景
+            ctx.fillStyle = '#f8fafc';
+            ctx.fillRect(paddingLeft, padding, width - paddingLeft - padding, height - 2 * padding);
+
+            // 绘制折线（平滑曲线+渐变填充）
+            const gradient = ctx.createLinearGradient(0, padding, 0, height - padding);
+            gradient.addColorStop(0, 'rgba(37, 99, 235, 0.4)');
+            gradient.addColorStop(1, 'rgba(37, 99, 235, 0)');
+            ctx.fillStyle = gradient;
+            ctx.beginPath();
+            ctx.moveTo(paddingLeft, height - padding);
+            trendData.forEach((item, i) => {
+                const x = paddingLeft + i * xStep;
+                const y = height - padding - (item.bytes - minBytes) * yScale;
+                if (i === 0) {
+                    ctx.lineTo(x, y);
+                } else {
+                    const prevX = paddingLeft + (i - 1) * xStep;
+                    const prevY = height - padding - (trendData[i - 1].bytes - minBytes) * yScale;
+                    const midX = (prevX + x) / 2;
+                    ctx.quadraticCurveTo(prevX, prevY, midX, (prevY + y) / 2);
+                    ctx.quadraticCurveTo(x, y, x, y);
+                }
+            });
+            ctx.lineTo(paddingLeft + (trendData.length - 1) * xStep, height - padding);
+            ctx.fill();
+
+            ctx.strokeStyle = '#2563eb';
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            trendData.forEach((item, i) => {
+                const x = paddingLeft + i * xStep;
+                const y = height - padding - (item.bytes - minBytes) * yScale;
+                if (i === 0) {
+                    ctx.moveTo(x, y);
+                } else {
+                    const prevX = paddingLeft + (i - 1) * xStep;
+                    const prevY = height - padding - (trendData[i - 1].bytes - minBytes) * yScale;
+                    const midX = (prevX + x) / 2;
+                    ctx.quadraticCurveTo(prevX, prevY, midX, (prevY + y) / 2);
+                    ctx.quadraticCurveTo(x, y, x, y);
+                }
+            });
+            ctx.stroke();
+
+            // 绘制数据点
+            ctx.fillStyle = '#1d4ed8';
+            trendData.forEach((item, i) => {
+                const x = paddingLeft + i * xStep;
+                const y = height - padding - (item.bytes - minBytes) * yScale;
+                ctx.beginPath();
+                ctx.arc(x, y, 5, 0, 2 * Math.PI);
+                ctx.fill();
+                ctx.strokeStyle = '#ffffff';
+                ctx.lineWidth = 1;
+                ctx.stroke();
+            });
+
+            // 绘制网格
+            ctx.strokeStyle = '#e5e7eb';
+            ctx.lineWidth = 1;
+            const yTicks = 5;
+            for (let i = 0; i <= yTicks; i++) {
+                const y = height - padding - (i / yTicks) * (height - 2 * padding);
+                ctx.beginPath();
+                ctx.moveTo(paddingLeft, y);
+                ctx.lineTo(width - padding, y);
+                ctx.stroke();
+            }
+            trendData.forEach((_, i) => {
+                const x = paddingLeft + i * xStep;
+                ctx.beginPath();
+                ctx.moveTo(x, padding);
+                ctx.lineTo(x, height - padding);
+                ctx.stroke();
+            });
+
+            // 绘制Y轴标签
+            ctx.fillStyle = '#1f2937';
+            ctx.font = '12px Arial';
+            ctx.textAlign = 'right';
+            for (let i = 0; i <= yTicks; i++) {
+                const y = height - padding - (i / yTicks) * (height - 2 * padding);
+                const value = (minBytes + (i / yTicks) * yRange).toFixed(2);
+                ctx.fillText(`${value} ${unit}`, paddingLeft - 10, y + 4);
+            }
+
+            // 绘制X轴标签（更新：使用新的formatTimeAxis）
+            ctx.fillStyle = '#1f2937';
+            ctx.font = '12px Arial';
+            ctx.textAlign = 'center';
+            trendData.forEach((item, i) => {
+                if (trendData.length > 10 && i % 2 !== 0) return; // 跳跃标签，防止拥挤
+                const x = paddingLeft + i * xStep;
+                ctx.fillText(formatTimeAxis(item.timestamp), x, height - padding + 20);
+            });
+        }, [trendData, tab]);
+
+        const renderTableHeaders = () => {
+            if (tab === 'traffic') {
+                return (
+                    <>
+                        <th className="py-2 px-4 border">Source IP</th>
+                        <th className="py-2 px-4 border">Target IP</th>
+                        <th className="py-2 px-4 border">Target Port</th>
+                        <th className="py-2 px-4 border">Protocol</th>
+                        <th className="py-2 px-4 border">Bandwidth</th>
+                        <th className="py-2 px-4 border">Requests</th>
+                    </>
+                );
+            } else if (tab === 'ip') {
+                return (
+                    <>
+                        <th className="py-2 px-4 border">IP</th>
+                        <th className="py-2 px-4 border">Bandwidth</th>
+                        <th className="py-2 px-4 border">Requests</th>
+                    </>
+                );
+            } else if (tab === 'ports') {
+                return (
+                    <>
+                        <th className="py-2 px-4 border">Target Port</th>
+                        <th className="py-2 px-4 border">Protocol</th>
+                        <th className="py-2 px-4 border">Bandwidth</th>
+                    </>
+                );
+            }
+        };
+
+        const renderTableRows = () => {
+            return data.map((item, index) => (
+                <tr key={index} className="hover:bg-gray-100">
+                    {tab === 'traffic' && (
+                        <>
+                            <td className="py-2 px-4 border">{item.src_ip || 'N/A'}</td>
+                            <td className="py-2 px-4 border">{item.dest_ip || 'N/A'}</td>
+                            <td className="py-2 px-4 border">{item.dest_port !== undefined ? item.dest_port : 'N/A'}</td>
+                            <td className="py-2 px-4 border">{item.protocol || 'N/A'}</td>
+                            <td className="py-2 px-4 border">{item.bandwidth !== undefined ? item.bandwidth.toFixed(2) + ' ' + (item.unit || 'N/A') : 'N/A'}</td>
+                            <td className="py-2 px-4 border">{item.requests !== undefined ? item.requests : 'N/A'}</td>
+                        </>
+                    )}
+                    {tab === 'ip' && (
+                        <>
+                            <td className="py-2 px-4 border">{item.ip || 'N/A'}</td>
+                            <td className="py-2 px-4 border">{item.bytes !== undefined ? item.bytes.toFixed(2) + ' ' + (item.unit || 'N/A') : 'N/A'}</td>
+                            <td className="py-2 px-4 border">{item.requests !== undefined ? item.requests : 'N/A'}</td>
+                        </>
+                    )}
+                    {tab === 'ports' && (
+                        <>
+                            <td className="py-2 px-4 border">{item.dest_port || 'N/A'}</td>
+                            <td className="py-2 px-4 border">{item.protocol || 'N/A'}</td>
+                            <td className="py-2 px-4 border">{item.bytes !== undefined ? item.bytes.toFixed(2) + ' ' + (item.unit || 'N/A') : 'N/A'}</td>
+                        </>
+                    )}
+                </tr>
+            ));
+        };
 
         return (
             <div className="container mx-auto p-4">
@@ -199,6 +435,26 @@
                         >
                             IPs
                         </button>
+                        <button
+                            onClick={() => setTab('ports')}
+                            className={`px-4 py-2 rounded-md font-semibold ${
+                                tab === 'ports'
+                                    ? 'bg-blue-600 text-white'
+                                    : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                            }`}
+                        >
+                            Ports
+                        </button>
+                        <button
+                            onClick={() => setTab('trend')}
+                            className={`px-4 py-2 rounded-md font-semibold ${
+                                tab === 'trend'
+                                    ? 'bg-blue-600 text-white'
+                                    : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                            }`}
+                        >
+                            Trend
+                        </button>
                     </div>
                     {loading && (
                         <div className="absolute inset-0 bg-gray-100 bg-opacity-50 flex items-center justify-center">
@@ -206,48 +462,22 @@
                         </div>
                     )}
                     {error && <p className="text-red-500 text-center">{error}</p>}
-                    {data.length === 0 && !error && !loading && <p className="text-center">No data available</p>}
-                    {data.length > 0 && (
+                    {tab !== 'trend' && data.length === 0 && !error && !loading && <p className="text-center">No data available</p>}
+                    {tab !== 'trend' && data.length > 0 && (
                         <table className="min-w-full bg-white border">
                             <thead>
                             <tr className="bg-gray-200 text-gray-600 uppercase text-sm">
-                                <th className="py-2 px-4 border">{tab === 'traffic' ? 'Source IP' : 'IP'}</th>
-                                {tab === 'traffic' && (
-                                    <>
-                                        <th className="py-2 px-4 border">Target IP</th>
-                                        <th className="py-2 px-4 border">Target Port</th>
-                                        <th className="py-2 px-4 border">Protocol</th>
-                                    </>
-                                )}
-                                <th className="py-2 px-4 border">Bandwidth</th>
-                                <th className="py-2 px-4 border">Requests</th>
+                                {renderTableHeaders()}
                             </tr>
                             </thead>
                             <tbody>
-                            {data.map((item, index) => (
-                                <tr key={index} className="hover:bg-gray-100">
-                                    <td className="py-2 px-4 border">
-                                        {tab === 'traffic' ? (item.src_ip || 'N/A') : (item.ip || 'N/A')}
-                                    </td>
-                                    {tab === 'traffic' && (
-                                        <>
-                                            <td className="py-2 px-4 border">{item.dest_ip || 'N/A'}</td>
-                                            <td className="py-2 px-4 border">{item.dest_port !== undefined ? item.dest_port : 'N/A'}</td>
-                                            <td className="py-2 px-4 border">{item.protocol || 'N/A'}</td>
-                                        </>
-                                    )}
-                                    <td className="py-2 px-4 border">
-                                        {(tab === 'traffic' ? item.bandwidth : item.bytes) !== undefined
-                                            ? (tab === 'traffic' ? item.bandwidth : item.bytes).toFixed(2) + ' ' + (item.unit || 'N/A')
-                                            : 'N/A'}
-                                    </td>
-                                    <td className="py-2 px-4 border">
-                                        {item.requests !== undefined ? item.requests : 'N/A'}
-                                    </td>
-                                </tr>
-                            ))}
+                            {renderTableRows()}
                             </tbody>
                         </table>
+                    )}
+                    {tab === 'trend' && trendData.length === 0 && !error && !loading && <p className="text-center">No trend data available</p>}
+                    {tab === 'trend' && trendData.length > 0 && (
+                        <canvas ref={canvasRef}></canvas>
                     )}
                 </div>
             </div>

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"embed"
 	"flag"
 	"fmt"
 	"github.com/google/gopacket/pcap"
@@ -14,10 +13,6 @@ import (
 	"syscall"
 	"time"
 )
-
-//go:embed index.html
-//go:embed static/*
-var content embed.FS
 
 type Logger struct{}
 

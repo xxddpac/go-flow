@@ -57,6 +57,24 @@ func (h *IPTrafficHeap) Pop() interface{} {
 	return x
 }
 
+type PortTrafficHeap []PortTraffic
+
+func (h PortTrafficHeap) Len() int { return len(h) }
+func (h PortTrafficHeap) Less(i, j int) bool {
+	return h[i].Bytes*getUnitFactor(h[i].Unit) < h[j].Bytes*getUnitFactor(h[j].Unit)
+}
+func (h PortTrafficHeap) Swap(i, j int) { h[i], h[j] = h[j], h[i] }
+func (h *PortTrafficHeap) Push(x interface{}) {
+	*h = append(*h, x.(PortTraffic))
+}
+func (h *PortTrafficHeap) Pop() interface{} {
+	old := *h
+	n := len(old)
+	x := old[n-1]
+	*h = old[0 : n-1]
+	return x
+}
+
 type Traffic struct {
 	Timestamp time.Time `json:"-"`
 	SrcIP     string    `json:"src_ip"`
@@ -75,22 +93,39 @@ type IPTraffic struct {
 	Unit     string  `json:"unit"`
 }
 
+type PortTraffic struct {
+	Protocol string  `json:"protocol"`
+	DstPort  uint16  `json:"dest_port"`
+	Bytes    float64 `json:"bytes"`
+	Unit     string  `json:"unit"`
+}
+
+type TrendItem struct {
+	Timestamp int64   `json:"timestamp"`
+	Bytes     float64 `json:"bytes"`
+	Requests  int64   `json:"requests"`
+	Unit      string  `json:"unit"`
+}
+
 type Bucket struct {
 	Timestamp int64
 	Stats     map[string]Traffic
 }
 
 type Window struct {
-	buckets  []*Bucket
-	size     time.Duration
-	bucketMu sync.RWMutex
-	ipStats  map[string]Traffic
-	statsMu  sync.RWMutex
-	cache    []Traffic
-	ipCache  []IPTraffic
-	cacheMu  sync.RWMutex
-	lastCalc time.Time
-	Rank     int
+	buckets    []*Bucket
+	size       time.Duration
+	bucketMu   sync.RWMutex
+	ipStats    map[string]Traffic
+	statsMu    sync.RWMutex
+	cache      []Traffic
+	ipCache    []IPTraffic
+	trendCache []TrendItem
+	cacheMu    sync.RWMutex
+	lastCalc   time.Time
+	Rank       int
+	portStats  map[uint16]PortTraffic
+	portCache  []PortTraffic
 }
 
 func NewWindow(size time.Duration, rank int) *Window {
@@ -103,10 +138,11 @@ func NewWindow(size time.Duration, rank int) *Window {
 		}
 	}
 	return &Window{
-		buckets: buckets,
-		size:    size,
-		ipStats: make(map[string]Traffic),
-		Rank:    rank,
+		buckets:   buckets,
+		size:      size,
+		portStats: make(map[uint16]PortTraffic),
+		ipStats:   make(map[string]Traffic),
+		Rank:      rank,
 	}
 }
 
@@ -152,7 +188,55 @@ func (w *Window) Add(traffic Traffic) {
 	agg.Bytes += traffic.Bytes
 	agg.Requests += traffic.Requests
 	w.ipStats[key] = agg
+
+	portStat := w.portStats[traffic.DstPort]
+	portStat.DstPort = traffic.DstPort
+	portStat.Bytes += traffic.Bytes
+	portStat.Protocol = traffic.Protocol
+	w.portStats[traffic.DstPort] = portStat
 	w.statsMu.Unlock()
+}
+
+func (w *Window) PortSummary() []PortTraffic {
+	w.statsMu.RLock()
+	portStats := make(map[uint16]PortTraffic, len(w.portStats))
+	totalBytes := 0.0
+	for port, s := range w.portStats {
+		if s.Bytes > 0 {
+			portStats[port] = s
+			totalBytes += s.Bytes
+		}
+	}
+	w.statsMu.RUnlock()
+
+	h := &PortTrafficHeap{}
+	heap.Init(h)
+	for _, s := range portStats {
+		mb := s.Bytes / 1e6
+		unit := "MB"
+		if mb >= 1000 {
+			s.Bytes = mb / 1000
+			unit = "GB"
+		} else {
+			s.Bytes = mb
+		}
+		s.Unit = unit
+		if h.Len() < w.Rank {
+			heap.Push(h, s)
+		} else if s.Bytes*getUnitFactor(s.Unit) > (*h)[0].Bytes*getUnitFactor((*h)[0].Unit) {
+			heap.Pop(h)
+			heap.Push(h, s)
+		}
+	}
+
+	result := make([]PortTraffic, h.Len())
+	for i := h.Len() - 1; i >= 0; i-- {
+		result[i] = heap.Pop(h).(PortTraffic)
+	}
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].Bytes*getUnitFactor(result[i].Unit) > result[j].Bytes*getUnitFactor(result[j].Unit)
+	})
+	return result
 }
 
 func (w *Window) Summary() []Traffic {
@@ -234,6 +318,62 @@ func (w *Window) IPSummary() []IPTraffic {
 	return result
 }
 
+func (w *Window) TrendSummary() []TrendItem {
+	w.bucketMu.RLock()
+	defer w.bucketMu.RUnlock()
+	trendMap := make(map[int64]TrendItem)
+	for _, bucket := range w.buckets {
+		if bucket.Timestamp == 0 {
+			continue
+		}
+		item := TrendItem{
+			Timestamp: bucket.Timestamp,
+			Bytes:     0,
+			Requests:  0,
+			Unit:      "MB",
+		}
+		for _, stat := range bucket.Stats {
+			item.Bytes += stat.Bytes
+			item.Requests += stat.Requests
+		}
+		mb := item.Bytes / 1e6
+		if mb >= 1000 {
+			item.Bytes = mb / 1000
+			item.Unit = "GB"
+		} else {
+			item.Bytes = mb
+		}
+		trendMap[bucket.Timestamp] = item
+	}
+
+	result := make([]TrendItem, 0, len(trendMap))
+	for _, item := range trendMap {
+		result = append(result, item)
+	}
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].Timestamp < result[j].Timestamp
+	})
+
+	if len(result) < len(w.buckets) {
+		now := time.Now().Truncate(time.Minute).Unix()
+		for ts := now - int64(w.size.Seconds()) + 60; ts <= now; ts += 60 {
+			if _, exists := trendMap[ts]; !exists {
+				result = append(result, TrendItem{
+					Timestamp: ts,
+					Bytes:     0,
+					Requests:  0,
+					Unit:      "MB",
+				})
+			}
+		}
+		sort.Slice(result, func(i, j int) bool {
+			return result[i].Timestamp < result[j].Timestamp
+		})
+	}
+
+	return result
+}
+
 func (w *Window) StartCacheUpdate(ctx context.Context, wg *sync.WaitGroup) {
 	defer wg.Done()
 	ticker := time.NewTicker(2 * time.Second)
@@ -242,9 +382,13 @@ func (w *Window) StartCacheUpdate(ctx context.Context, wg *sync.WaitGroup) {
 		case <-ticker.C:
 			result := w.Summary()
 			ipResult := w.IPSummary()
+			portResult := w.PortSummary()
+			trendResult := w.TrendSummary()
 			w.cacheMu.Lock()
 			w.cache = result
 			w.ipCache = ipResult
+			w.portCache = portResult
+			w.trendCache = trendResult
 			w.lastCalc = time.Now()
 			w.cacheMu.Unlock()
 		case <-ctx.Done():

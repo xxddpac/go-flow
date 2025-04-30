@@ -41,19 +41,19 @@ http://ip_address:31415
 ## Screenshot
 - `Flows` show the top N flows detail in sliding window
 
-<img src="image/flows.png" alt="">
+![Flows Image](image/flows.png)
 
 - `IPs` show the top N IPs use total bandwidth in sliding window
 
-<img src="image/ips.png" alt="">
+![IPs Image](image/ips.png)
 
 - `Ports` show the top N Ports use total bandwidth in sliding window
 
-<img src="image/ports.png" alt="">
+![Ports Image](image/ports.png)
 
 - `Trend` show the Trend of the bandwidth in sliding window
 
-<img src="image/trend.png" alt="">
+![Trend Image](image/trend.png)
 
 ## Build
 

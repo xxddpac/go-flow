@@ -16,6 +16,7 @@ simplicity and performance, it also includes a built-in web UI for intuitive, re
 ```
 
 ## Screenshot
+
 - `Flows` show the top N flows detail in sliding window
 
 ![Flows](https://raw.githubusercontent.com/xxddpac/go-flow/main/image/flows.jpg)
@@ -32,7 +33,7 @@ simplicity and performance, it also includes a built-in web UI for intuitive, re
 
 ![Trend](https://raw.githubusercontent.com/xxddpac/go-flow/main/image/trend.jpg)
 
-- `Alert` show the Alert of the bandwidth in sliding window
+- `Alert` alert when the bandwidth exceed the threshold (Mail/WeCom)
 ![Alert](https://raw.githubusercontent.com/xxddpac/go-flow/main/image/alert.jpg)
 
 ## Build

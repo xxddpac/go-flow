@@ -1,26 +1,25 @@
-package main
+package utils
 
 import (
 	"context"
-	"sync"
+	"fmt"
+	"time"
 )
 
 const (
-	timeLayout = "2006-01-02 15:04:05"
-	port       = 31415
+	TimeLayout = "2006-01-02 15:04:05"
 )
 
 var (
-	ctx      context.Context
-	cancel   context.CancelFunc
-	syncPool = sync.Pool{New: func() interface{} { return &Traffic{} }}
+	Ctx    context.Context
+	Cancel context.CancelFunc
 )
 
 func init() {
-	ctx, cancel = context.WithCancel(context.Background())
+	Ctx, Cancel = context.WithCancel(context.Background())
 }
 
-var portMapping = map[string]string{
+var PortMapping = map[string]string{
 	"20":    "FTP",
 	"21":    "FTP",
 	"22":    "SSH",
@@ -57,4 +56,12 @@ var portMapping = map[string]string{
 	"8500":  "Consul",
 	"9092":  "Kafka",
 	"9200":  "Elasticsearch",
+}
+
+func GetTimeRangeString(minutes int) string {
+	now := time.Now()
+	start := now.Add(-time.Duration(minutes * int(time.Minute)))
+	return fmt.Sprintf("%s - %s",
+		start.Format("2006-01-02 15:04:05"),
+		now.Format("2006-01-02 15:04:05"))
 }

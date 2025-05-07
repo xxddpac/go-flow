@@ -4,10 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>GO-FLOW</title>
-    <script src="/static/react.production.min.js"></script>
-    <script src="/static/react-dom.production.min.js"></script>
-    <script src="/static/babel.min.js"></script>
-    <script src="/static/tailwind.min.js"></script>
+    <script src="static/react.production.min.js"></script>
+    <script src="static/react-dom.production.min.js"></script>
+    <script src="static/babel.min.js"></script>
+    <script src="static/tailwind.min.js"></script>
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -192,11 +192,9 @@
 
             const xStep = (width - paddingLeft - padding) / (trendData.length - 1);
 
-            // 绘制背景
             ctx.fillStyle = '#f8fafc';
             ctx.fillRect(paddingLeft, padding, width - paddingLeft - padding, height - 2 * padding);
 
-            // 绘制折线（平滑曲线+渐变填充）
             const gradient = ctx.createLinearGradient(0, padding, 0, height - padding);
             gradient.addColorStop(0, 'rgba(37, 99, 235, 0.4)');
             gradient.addColorStop(1, 'rgba(37, 99, 235, 0)');
@@ -237,7 +235,6 @@
             });
             ctx.stroke();
 
-            // 绘制数据点
             ctx.fillStyle = '#1d4ed8';
             trendData.forEach((item, i) => {
                 const x = paddingLeft + i * xStep;
@@ -250,7 +247,6 @@
                 ctx.stroke();
             });
 
-            // 绘制网格
             ctx.strokeStyle = '#e5e7eb';
             ctx.lineWidth = 1;
             const yTicks = 5;
@@ -269,7 +265,6 @@
                 ctx.stroke();
             });
 
-            // 绘制Y轴标签
             ctx.fillStyle = '#1f2937';
             ctx.font = '12px Arial';
             ctx.textAlign = 'right';
@@ -279,12 +274,11 @@
                 ctx.fillText(`${value} ${unit}`, paddingLeft - 10, y + 4);
             }
 
-            // 绘制X轴标签（更新：使用新的formatTimeAxis）
             ctx.fillStyle = '#1f2937';
             ctx.font = '12px Arial';
             ctx.textAlign = 'center';
             trendData.forEach((item, i) => {
-                if (trendData.length > 10 && i % 2 !== 0) return; // 跳跃标签，防止拥挤
+                if (trendData.length > 10 && i % 2 !== 0) return;
                 const x = paddingLeft + i * xStep;
                 ctx.fillText(formatTimeAxis(item.timestamp), x, height - padding + 20);
             });

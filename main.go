@@ -3,8 +3,11 @@ package main
 import (
 	"flag"
 	"fmt"
-	"github.com/google/gopacket/pcap"
 	"github.com/xxddpac/async"
+	"go-flow/conf"
+	"go-flow/flow"
+	"go-flow/notify"
+	"go-flow/utils"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"net/http"
@@ -21,40 +24,28 @@ func (l Logger) Printf(format string, args ...interface{}) {
 }
 
 func main() {
-	eth := flag.String("eth", "", "Network interface")
-	size := flag.Int("size", 5, "Sliding window size")
-	workers := flag.Int("workers", 1000, "Number of workers")
-	rank := flag.Int("rank", 10, "Top Rank")
+	var cfg string
+	flag.StringVar(&cfg, "c", "", "server config [toml]")
 	flag.Parse()
-
-	if *eth == "" {
-		iFaces, _ := pcap.FindAllDevs()
-		_, _ = fmt.Fprintln(os.Stderr, "Available interfaces:")
-		for _, iFace := range iFaces {
-			_, _ = fmt.Fprintf(os.Stderr, "- %s: %s\n", iFace.Name, iFace.Description)
-		}
-		os.Exit(1)
+	if len(cfg) == 0 {
+		fmt.Println("config is empty")
+		os.Exit(0)
 	}
-
-	if *size <= 0 || *rank <= 0 || *workers <= 0 {
-		_, _ = fmt.Fprintln(os.Stderr, "Error: --size must be positive")
-		flag.Usage()
-		os.Exit(1)
-	}
+	conf.Init(cfg)
 	var (
 		config = zap.NewProductionConfig()
 		pool   = async.New(
-			async.WithMaxWorkers(*workers),
-			async.WithMaxQueue(*workers*10),
+			async.WithMaxWorkers(conf.CoreConf.Server.Workers),
+			async.WithMaxQueue(conf.CoreConf.Server.Workers*10),
 			async.WithLogger(Logger{}),
 		)
-		window = NewWindow(time.Duration(*size)*time.Minute, *rank)
+		window = flow.NewWindow(time.Duration(conf.CoreConf.Server.Size)*time.Minute, conf.CoreConf.Server.Rank)
 	)
-	config.EncoderConfig.EncodeTime = zapcore.TimeEncoderOfLayout(timeLayout)
+	config.EncoderConfig.EncodeTime = zapcore.TimeEncoderOfLayout(utils.TimeLayout)
 	cb, _ := config.Build()
 	zap.ReplaceGlobals(cb)
 	defer func() {
-		pool.Logger.Printf("+++++ quit +++++")
+		pool.Logger.Printf("+++++ exit +++++")
 		pool.Close()
 		_ = cb.Sync()
 	}()
@@ -62,21 +53,22 @@ func main() {
 	mux := http.NewServeMux()
 	mux.Handle("/", window)
 	server := &http.Server{
-		Addr:    fmt.Sprintf(":%d", port),
+		Addr:    fmt.Sprintf(":%d", conf.CoreConf.Server.Port),
 		Handler: mux,
 	}
 
-	pool.Wg.Add(3)
-	go window.StartCacheUpdate(ctx, &pool.Wg)
-	go capture(ctx, *eth, pool, window)
+	pool.Wg.Add(4)
+	go notify.Init(utils.Ctx, pool)
+	go window.StartCacheUpdate(utils.Ctx, &pool.Wg)
+	go flow.Capture(utils.Ctx, conf.CoreConf.Server.Eth, pool, window)
 	go func() {
-		if err := http.ListenAndServe(fmt.Sprintf(":%d", port-1), nil); err != nil {
+		if err := http.ListenAndServe(fmt.Sprintf(":%d", conf.CoreConf.Server.Port-1), nil); err != nil {
 			pool.Logger.Printf("pprof: %s", fmt.Sprintf("pprof err: %v", err))
 		}
 	}()
 	go func() {
 		defer pool.Wg.Done()
-		pool.Logger.Printf(fmt.Sprintf("HTTP server starting at port:%d", port))
+		pool.Logger.Printf(fmt.Sprintf("visit http://localhost:%d", conf.CoreConf.Server.Port))
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			pool.Logger.Printf("HTTP server error: %v", err)
 		}
@@ -90,9 +82,9 @@ func main() {
 		select {
 		case sig := <-signals:
 			pool.Logger.Printf("Received signal: %v", sig.String())
-			_ = server.Shutdown(ctx)
+			_ = server.Shutdown(utils.Ctx)
 			<-time.After(time.Second)
-			cancel()
+			utils.Cancel()
 		}
 	}()
 	pool.Wg.Wait()

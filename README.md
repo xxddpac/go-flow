@@ -12,34 +12,10 @@ simplicity and performance, it also includes a built-in web UI for intuitive, re
 
 ```
 # Download the binary from new latest release
-
-# For Linux
-chmod +x go-flow
-./go-flow --eth=<network interface>
-
-# For windows
-./go-flow.exe --eth=<network interface>
-```
-
-## Options
-
-```
---size int
-        Size of the sliding window in minutes (default 5)
---workers int
-        Number of worker threads to process packets (default 1000)
---rank int
-        Number of top IPs to display (default 10)
-```
-
-## Web UI
-
-```
-http://ip_address:31415
+./go-flow -c config.toml
 ```
 
 ## Screenshot
-
 - `Flows` show the top N flows detail in sliding window
 
 ![Flows](https://raw.githubusercontent.com/xxddpac/go-flow/main/image/flows.jpg)
@@ -55,6 +31,9 @@ http://ip_address:31415
 - `Trend` show the Trend of the bandwidth in sliding window
 
 ![Trend](https://raw.githubusercontent.com/xxddpac/go-flow/main/image/trend.jpg)
+
+- `Alert` show the Alert of the bandwidth in sliding window
+![Alert](https://raw.githubusercontent.com/xxddpac/go-flow/main/image/alert.jpg)
 
 ## Build
 

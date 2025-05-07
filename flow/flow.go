@@ -1,17 +1,25 @@
-package main
+package flow
 
 import (
 	"container/heap"
 	"context"
+	"embed"
 	"fmt"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcap"
+	ji "github.com/json-iterator/go"
 	"github.com/xxddpac/async"
+	"go-flow/conf"
+	"go-flow/notify"
+	"go-flow/utils"
+	"net/http"
 	"sort"
 	"sync"
 	"time"
 )
+
+var syncPool = sync.Pool{New: func() interface{} { return &Traffic{} }}
 
 type TrafficHeap []Traffic
 
@@ -398,7 +406,7 @@ func (w *Window) StartCacheUpdate(ctx context.Context, wg *sync.WaitGroup) {
 	}
 }
 
-func capture(ctx context.Context, device string, pool *async.WorkerPool, w *Window) {
+func Capture(ctx context.Context, device string, pool *async.WorkerPool, w *Window) {
 	handle, err := pcap.OpenLive(device, 2048, true, pcap.BlockForever)
 	if err != nil {
 		panic(err)
@@ -455,12 +463,31 @@ func capture(ctx context.Context, device string, pool *async.WorkerPool, w *Wind
 				return nil
 			}, packet)
 		case <-ticker.C:
-			//todo 【alert】 high bandwidth for single ip
-			//for _, item := range w.ipCache {
-			//	if item.Bytes > 1000 {
-			//		pool.Logger.Printf("+++++ high bandwidth ip: %s +++++", item.IP)
-			//	}
-			//}
+			//【alert】 high bandwidth for single ip
+			var alerts []notify.Ddos
+			thresholdBytes := getThresholdBytes()
+			w.cacheMu.RLock()
+			for _, s := range w.ipCache {
+				bytes := s.Bytes * getUnitFactor(s.Unit)
+				if bytes > thresholdBytes {
+					if notify.IsWhiteIp(s.IP) {
+						continue
+					}
+					alerts = append(alerts, notify.Ddos{
+						IP:        s.IP,
+						Bandwidth: fmt.Sprintf("%.2f%s", s.Bytes, s.Unit),
+					})
+				}
+			}
+			if len(alerts) > 0 {
+				notify.Base.Queue(notify.DdosAlert{
+					Alerts:    alerts,
+					Timestamp: time.Now().Format(utils.TimeLayout),
+					Location:  conf.CoreConf.Notify.Location,
+					TimeRange: utils.GetTimeRangeString(conf.CoreConf.Server.Size),
+				})
+			}
+			w.cacheMu.RUnlock()
 		case <-ctx.Done():
 			return
 		}
@@ -480,4 +507,168 @@ func getUnitFactor(unit string) float64 {
 	default:
 		return 1
 	}
+}
+
+func getThresholdBytes() float64 {
+	var (
+		unit  = conf.CoreConf.Notify.ThresholdUnit
+		value = conf.CoreConf.Notify.ThresholdValue
+	)
+	switch unit {
+	case "GB":
+		return value * 1e9
+	case "MB":
+		return value * 1e6
+	default:
+		return value
+	}
+}
+
+//go:embed index.html
+//go:embed static/*
+var content embed.FS
+
+type TopItem struct {
+	SrcIP     string  `json:"src_ip"`
+	DstIP     string  `json:"dest_ip"`
+	DstPort   string  `json:"dest_port"`
+	Protocol  string  `json:"protocol"`
+	Bandwidth float64 `json:"bandwidth"`
+	Unit      string  `json:"unit"`
+	Requests  int64   `json:"requests"`
+}
+
+type TopResponse struct {
+	Data       []TopItem `json:"data"`
+	Timestamp  int64     `json:"timestamp"`
+	WindowSize int       `json:"window_size"`
+	Rank       int       `json:"rank"`
+}
+
+type PortResponse struct {
+	DstPort  string  `json:"dest_port"`
+	Bytes    float64 `json:"bytes"`
+	Protocol string  `json:"protocol"`
+	Unit     string  `json:"unit"`
+}
+
+type TrendResponse struct {
+	Data       []TrendItem `json:"data"`
+	WindowSize int         `json:"window_size"`
+}
+
+func (w *Window) ServeHTTP(wr http.ResponseWriter, r *http.Request) {
+	if r.URL.Path == "/top" {
+		w.cacheMu.RLock()
+		top := w.cache
+		w.cacheMu.RUnlock()
+		resp := make([]TopItem, len(top))
+		for i, s := range top {
+			var (
+				ok      bool
+				service string
+				portStr = fmt.Sprintf("%d", s.DstPort)
+			)
+			service, ok = utils.PortMapping[portStr]
+			if !ok {
+				service = portStr
+			} else {
+				service = fmt.Sprintf("%s / %s", portStr, service)
+			}
+			resp[i] = TopItem{
+				SrcIP:     s.SrcIP,
+				DstIP:     s.DstIP,
+				DstPort:   service,
+				Protocol:  s.Protocol,
+				Bandwidth: s.Bytes,
+				Unit:      s.Unit,
+				Requests:  s.Requests,
+			}
+		}
+		response := TopResponse{
+			Data:       resp,
+			Timestamp:  w.lastCalc.Unix(),
+			WindowSize: int(w.size.Seconds()),
+			Rank:       w.Rank,
+		}
+		wr.Header().Set("Content-Type", "application/json")
+		if err := ji.NewEncoder(wr).Encode(response); err != nil {
+			http.Error(wr, "Failed to encode JSON", http.StatusInternalServerError)
+		}
+		return
+	}
+	if r.URL.Path == "/ip_top" {
+		w.cacheMu.RLock()
+		top := w.ipCache
+		w.cacheMu.RUnlock()
+		resp := make([]IPTraffic, len(top))
+		for i, s := range top {
+			resp[i] = IPTraffic{
+				IP:       s.IP,
+				Unit:     s.Unit,
+				Requests: s.Requests,
+				Bytes:    s.Bytes,
+			}
+		}
+		wr.Header().Set("Content-Type", "application/json")
+		if err := ji.NewEncoder(wr).Encode(resp); err != nil {
+			http.Error(wr, "Failed to encode JSON", http.StatusInternalServerError)
+		}
+		return
+	}
+	if r.URL.Path == "/stats/ports" {
+		w.cacheMu.RLock()
+		top := w.portCache
+		w.cacheMu.RUnlock()
+		response := make([]PortResponse, len(top))
+		for i, s := range top {
+			var (
+				ok      bool
+				dPort   string
+				portStr = fmt.Sprintf("%d", s.DstPort)
+			)
+			dPort, ok = utils.PortMapping[portStr]
+			if !ok {
+				dPort = portStr
+			} else {
+				dPort = fmt.Sprintf("%s / %s", portStr, dPort)
+			}
+			response[i] = PortResponse{
+				DstPort:  dPort,
+				Bytes:    s.Bytes,
+				Protocol: s.Protocol,
+				Unit:     s.Unit,
+			}
+		}
+		wr.Header().Set("Content-Type", "application/json")
+		if err := ji.NewEncoder(wr).Encode(response); err != nil {
+			http.Error(wr, "Failed to encode JSON", http.StatusInternalServerError)
+		}
+		return
+	}
+	if r.URL.Path == "/trend" {
+		w.cacheMu.RLock()
+		trend := w.trendCache
+		w.cacheMu.RUnlock()
+		response := TrendResponse{
+			Data:       trend,
+			WindowSize: int(w.size.Seconds()),
+		}
+		wr.Header().Set("Content-Type", "application/json")
+		if err := ji.NewEncoder(wr).Encode(response); err != nil {
+			http.Error(wr, "Failed to encode JSON", http.StatusInternalServerError)
+		}
+		return
+	}
+	if r.URL.Path == "/" {
+		file, err := content.ReadFile("index.html")
+		if err != nil {
+			http.Error(wr, "Failed to read index.html", http.StatusInternalServerError)
+			return
+		}
+		wr.Header().Set("Content-Type", "text/html")
+		_, _ = wr.Write(file)
+		return
+	}
+	http.FileServer(http.FS(content)).ServeHTTP(wr, r)
 }

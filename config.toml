@@ -1,0 +1,30 @@
+[server]
+Workers = 1000  # Number of worker threads to process packets
+Size = 10   # Size of the sliding window in minutes
+Rank = 30  # Number of top IPs to display
+Eth = "\\Device\\NPF_{A71580F4-5312-4FF8-B88B-3D935E2CACB1}" # replace with your network interface name
+# Eth = "em0"
+Port = 31415 # Port to listen for Http server
+
+
+[notify]
+Enable = false # set true to enable notification
+ThresholdValue = 10 # Threshold value for notification
+ThresholdUnit = "GB" # Unit for threshold value, can be "MB" or "GB"
+WhiteList = ["10.18.1.1", "10.18.1.2"] # alert bypass IPs
+Location = "Office" # Location of the monitor server
+
+[wecom]
+Enable = false # set true to enable
+WebHook = "" # WeCom Rebot webhook URL
+
+[mail]
+Enable = false # set true to enable
+SmtpHost = ""
+SmtpPort = 25
+Username = ""
+Password = ""
+To = ""
+From = ""
+Cc = [""]
+

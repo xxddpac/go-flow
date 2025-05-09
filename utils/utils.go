@@ -3,11 +3,15 @@ package utils
 import (
 	"context"
 	"fmt"
+	"github.com/google/gopacket/pcap"
+	"net"
+	"strings"
 	"time"
 )
 
 const (
-	TimeLayout = "2006-01-02 15:04:05"
+	TimeLayout       = "2006-01-02 15:04:05"
+	BroadcastAddress = "255.255.255.255"
 )
 
 var (
@@ -29,10 +33,13 @@ var PortMapping = map[string]string{
 	"69":    "TFTP",
 	"80":    "HTTP",
 	"110":   "POP3",
+	"123":   "NTP",
 	"135":   "MS-RPC",
 	"139":   "NetBIOS-SSN",
 	"143":   "IMAP",
-	"169":   "SNMP",
+	"161":   "SNMP",
+	"162":   "SNMP",
+	"179":   "BGP",
 	"389":   "LDAP",
 	"443":   "HTTPS",
 	"445":   "SMB",
@@ -44,6 +51,7 @@ var PortMapping = map[string]string{
 	"995":   "POP3S",
 	"1433":  "SQL-Server",
 	"1521":  "Oracle",
+	"1723":  "PPTP",
 	"2379":  "Etcd",
 	"2181":  "ZooKeeper",
 	"27017": "MongoDB",
@@ -56,6 +64,8 @@ var PortMapping = map[string]string{
 	"8500":  "Consul",
 	"9092":  "Kafka",
 	"9200":  "Elasticsearch",
+	"10050": "Zabbix",
+	"10051": "Zabbix",
 }
 
 func GetTimeRangeString(minutes int) string {
@@ -64,4 +74,43 @@ func GetTimeRangeString(minutes int) string {
 	return fmt.Sprintf("%s - %s",
 		start.Format("2006-01-02 15:04:05"),
 		now.Format("2006-01-02 15:04:05"))
+}
+
+func IsValidIP(ip string) bool {
+	parsedIP := net.ParseIP(ip)
+	if parsedIP == nil {
+		return false
+	}
+	if parsedIP.IsLoopback() || parsedIP.IsUnspecified() {
+		return false
+	}
+	if parsedIP.IsMulticast() {
+		return false
+	}
+	if ip == BroadcastAddress {
+		return false
+	}
+	if strings.HasPrefix(ip, "169.254.") {
+		return false
+	}
+	return true
+}
+
+func ListAvailableDevices() {
+	devices, err := pcap.FindAllDevs()
+	if err != nil {
+		fmt.Printf("无法获取网卡列表: %v\n", err)
+		return
+	}
+	if len(devices) == 0 {
+		fmt.Println("未发现任何可用网卡。")
+		return
+	}
+	for _, dev := range devices {
+		fmt.Printf("- %s", dev.Name)
+		if dev.Description != "" {
+			fmt.Printf(" (%s)", dev.Description)
+		}
+		fmt.Println()
+	}
 }

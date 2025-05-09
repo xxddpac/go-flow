@@ -45,7 +45,7 @@ func main() {
 	cb, _ := config.Build()
 	zap.ReplaceGlobals(cb)
 	defer func() {
-		pool.Logger.Printf("+++++ exit +++++")
+		pool.Logger.Printf("+++++ Bye +++++")
 		pool.Close()
 		_ = cb.Sync()
 	}()

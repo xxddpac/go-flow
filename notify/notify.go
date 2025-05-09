@@ -55,16 +55,24 @@ func Init(ctx context.Context, p *async.WorkerPool) {
 	}
 }
 
-type Ddos struct {
+type Bandwidth struct {
 	IP        string
 	Bandwidth string
 }
 
+type Frequency struct {
+	IP    string
+	Count int
+	Desc  string
+}
+
 type DdosAlert struct {
-	Alerts    []Ddos
-	Timestamp string
-	Location  string
-	TimeRange string
+	BandwidthS []Bandwidth
+	FrequencyS []Frequency
+	Title      string
+	Timestamp  string
+	Location   string
+	TimeRange  string
 }
 
 func (b *base) Queue(d DdosAlert) {

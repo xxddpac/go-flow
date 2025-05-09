@@ -50,7 +50,7 @@
 <body>
 <div id="root"></div>
 <script type="text/babel">
-    const { useState, useEffect, useRef } = React;
+    const {useState, useEffect, useRef} = React;
 
     const FlowTable = () => {
         const [data, setData] = useState([]);
@@ -94,7 +94,7 @@
         const fetchData = async () => {
             setLoading(true);
             try {
-                const topResponse = await fetch('/top', { cache: 'no-cache' });
+                const topResponse = await fetch('/top', {cache: 'no-cache'});
                 if (!topResponse.ok) {
                     throw new Error(`HTTP error from /top: ${topResponse.status}`);
                 }
@@ -108,7 +108,7 @@
                 if (tab === 'traffic') {
                     dataArray = topJson.data || [];
                 } else if (tab === 'trend') {
-                    const response = await fetch('/trend', { cache: 'no-cache' });
+                    const response = await fetch('/trend', {cache: 'no-cache'});
                     if (!response.ok) {
                         throw new Error(`HTTP error from /trend: ${response.status}`);
                     }
@@ -117,7 +117,7 @@
                     setTrendData(dataArray);
                 } else {
                     const endpoint = tab === 'ip' ? '/ip_top' : '/stats/ports';
-                    const response = await fetch(endpoint, { cache: 'no-cache' });
+                    const response = await fetch(endpoint, {cache: 'no-cache'});
                     if (!response.ok) {
                         throw new Error(`HTTP error from ${endpoint}: ${response.status}`);
                     }
@@ -417,7 +417,7 @@
                                     : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
                             }`}
                         >
-                            Flows
+                            Sessions
                         </button>
                         <button
                             onClick={() => setTab('ip')}
@@ -427,7 +427,7 @@
                                     : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
                             }`}
                         >
-                            IPs
+                            IP Stats
                         </button>
                         <button
                             onClick={() => setTab('ports')}
@@ -437,7 +437,7 @@
                                     : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
                             }`}
                         >
-                            Ports
+                            Port Stats
                         </button>
                         <button
                             onClick={() => setTab('trend')}
@@ -456,7 +456,8 @@
                         </div>
                     )}
                     {error && <p className="text-red-500 text-center">{error}</p>}
-                    {tab !== 'trend' && data.length === 0 && !error && !loading && <p className="text-center">No data available</p>}
+                    {tab !== 'trend' && data.length === 0 && !error && !loading &&
+                        <p className="text-center">No data available</p>}
                     {tab !== 'trend' && data.length > 0 && (
                         <table className="min-w-full bg-white border">
                             <thead>
@@ -469,7 +470,8 @@
                             </tbody>
                         </table>
                     )}
-                    {tab === 'trend' && trendData.length === 0 && !error && !loading && <p className="text-center">No trend data available</p>}
+                    {tab === 'trend' && trendData.length === 0 && !error && !loading &&
+                        <p className="text-center">No trend data available</p>}
                     {tab === 'trend' && trendData.length > 0 && (
                         <canvas ref={canvasRef}></canvas>
                     )}
@@ -479,7 +481,7 @@
     };
 
     const root = ReactDOM.createRoot(document.getElementById('root'));
-    root.render(<FlowTable />);
+    root.render(<FlowTable/>);
 </script>
 </body>
 </html>

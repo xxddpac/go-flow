@@ -50,9 +50,10 @@ type Mail struct {
 }
 
 type Notify struct {
-	Enable         bool
-	ThresholdValue float64
-	ThresholdUnit  string
-	Whitelist      []string
-	Location       string
+	Enable             bool
+	ThresholdValue     float64
+	ThresholdUnit      string
+	Whitelist          []string
+	Location           string
+	FrequencyThreshold int
 }

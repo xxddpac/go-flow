@@ -9,13 +9,20 @@ import (
 	"text/template"
 )
 
-const Template = "【GO-FLOW】 `**High Bandwidth Alert**`\n" +
-	"{{if .Timestamp}}>AlertTime：{{.Timestamp}}\n{{end}}" +
-	"{{if .Location}}>Location：{{.Location}}\n{{end}}" +
-	"{{if .TimeRange}}>TimeRange：<font color=\"info\">{{.TimeRange}}\n{{end}}</font>" +
-	"**== Alert Detail ==**\n" +
-	"{{range $index, $alert := .Alerts}}" +
-	"{{add $index 1}}. IP: <font color=\"warning\">{{$alert.IP}}</font>, Bandwidth: <font color=\"warning\">{{$alert.Bandwidth}}</font>\n" +
+const WcComTemplate = "【GO-FLOW】 `**{{if .Title}}{{.Title}}{{end}}**`\n" +
+	"{{if .Timestamp}}>告警时间：{{.Timestamp}}\n{{end}}" +
+	"{{if .Location}}>所属位置：{{.Location}}\n{{end}}" +
+	"{{if .TimeRange}}>滑动窗口：{{.TimeRange}}\n{{end}}" +
+	"**== 告警详情 ==**\n" +
+	"{{if .BandwidthS}}" +
+	"{{range $index, $alert := .BandwidthS}}" +
+	"{{add $index 1}} 异常IP <font color=\"warning\">{{$alert.IP}}</font>, 使用流量 <font color=\"warning\">{{$alert.Bandwidth}}</font>\n" +
+	"{{end}}" +
+	"{{end}}" +
+	"{{if .FrequencyS}}" +
+	"{{range $index, $alert := .FrequencyS}}" +
+	"{{add $index 1}} <font color=\"warning\">{{$alert.Desc}}</font>\n" +
+	"{{end}}" +
 	"{{end}}"
 
 var (
@@ -52,7 +59,7 @@ func (w *WeCom) Send(d DdosAlert) error {
 		tmpl *template.Template
 	)
 	url = conf.CoreConf.WeCom.WebHook
-	tmpl, err = template.New("alert").Funcs(funcMap).Parse(Template)
+	tmpl, err = template.New("alert").Funcs(funcMap).Parse(WcComTemplate)
 	if err != nil {
 		return err
 	}

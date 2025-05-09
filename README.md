@@ -1,42 +1,44 @@
-# go-flow
+# GO-FLOW
 
-[中文文档（Chinese Docs）](https://github.com/xxddpac/go-flow/blob/main/README_ZH.md)
+## 介绍
 
-## Overview
+go-flow 是一款轻量级、高性能的实时网络流量监控与异常检测工具。
+基于可配置的滑动时间窗口进行流量分析，并提供简洁直观的 Web 控制台，方便实时查看网络态势。
+内置告警机制可快速识别异常大流量、高频扫描、分布式探测等可疑行为并触发告警，提前预警潜在安全风险。
 
-go-flow is a lightweight and efficient real-time network traffic monitoring tool, ideal for medium-scale traffic
-environments. It captures TCP/UDP packets and analyzes traffic using a configurable sliding time window. Designed for
-simplicity and performance, it also includes a built-in web UI for intuitive, real-time visualization.
-
-## Usage
+## 使用
 
 ```
-# Download the binary from new latest release
+# 下载最新的Release版本
 ./go-flow -c config.toml
+# 具体配置见 config.toml
 ```
 
-## Screenshot
+## WEB控制台
 
-- `Flows` show the top N flows detail in sliding window
+- `Sessions` 展示会话级流量，包含源/目的 IP、端口、协议、流量占用和请求次数，便于分析具体通信关系
 
 ![Flows](https://raw.githubusercontent.com/xxddpac/go-flow/main/image/flows.jpg)
 
-- `IPs` show the top N IPs use total bandwidth in sliding window
+- `IP Stats` 展示单个 IP 的流量使用和请求次数，帮助识别高流量主机和活跃节点
 
 ![IPs](https://raw.githubusercontent.com/xxddpac/go-flow/main/image/ips.jpg)
 
-- `Ports` show the top N Ports use total bandwidth in sliding window
+- `Port Stats` 展示各目的端口的流量占用和协议分布，便于识别热门服务和异常端口活动
 
 ![Ports](https://raw.githubusercontent.com/xxddpac/go-flow/main/image/ports.jpg)
 
-- `Trend` show the Trend of the bandwidth in sliding window
+- `Trend` 展示滑动时间窗口内整体网络流量变化趋势，便于观察流量高峰、波动和异常增长情况
 
 ![Trend](https://raw.githubusercontent.com/xxddpac/go-flow/main/image/trend.jpg)
 
-- `Alert` alert when the bandwidth exceed the threshold (Mail/WeCom)
-![Alert](https://raw.githubusercontent.com/xxddpac/go-flow/main/image/alert.jpg)
+## 预警 (邮件/企微)
 
-## Build
+![Bandwidth](https://raw.githubusercontent.com/xxddpac/go-flow/main/image/bandwidth.jpg)
+
+![Frequency](https://raw.githubusercontent.com/xxddpac/go-flow/main/image/frequency.jpg)
+
+## 编译
 
 ```
 git clone https://github.com/xxddpac/go-flow.git
@@ -44,11 +46,9 @@ cd go-flow
 
 # Build for CentOS
 make build-centos
-# Output: bin/go-flow
 
 # Build for Windows
 make build-win
-# Output: bin/go-flow.exe
 
 # Clean build artifacts
 make clean

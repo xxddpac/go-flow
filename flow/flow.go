@@ -14,7 +14,9 @@ import (
 	"go-flow/notify"
 	"go-flow/utils"
 	"net/http"
+	"os"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -121,19 +123,22 @@ type Bucket struct {
 }
 
 type Window struct {
-	buckets    []*Bucket
-	size       time.Duration
-	bucketMu   sync.RWMutex
-	ipStats    map[string]Traffic
-	statsMu    sync.RWMutex
-	cache      []Traffic
-	ipCache    []IPTraffic
-	trendCache []TrendItem
-	cacheMu    sync.RWMutex
-	lastCalc   time.Time
-	Rank       int
-	portStats  map[uint16]PortTraffic
-	portCache  []PortTraffic
+	buckets       []*Bucket
+	size          time.Duration
+	bucketMu      sync.RWMutex
+	ipStats       map[string]Traffic
+	statsMu       sync.RWMutex
+	cache         []Traffic
+	ipCache       []IPTraffic
+	trendCache    []TrendItem
+	cacheMu       sync.RWMutex
+	lastCalc      time.Time
+	Rank          int
+	portStats     map[uint16]PortTraffic
+	portCache     []PortTraffic
+	srcToDstStats map[string]map[string]bool
+	dstToSrcStats map[string]map[string]bool
+	freqStatsMu   sync.RWMutex
 }
 
 func NewWindow(size time.Duration, rank int) *Window {
@@ -146,15 +151,20 @@ func NewWindow(size time.Duration, rank int) *Window {
 		}
 	}
 	return &Window{
-		buckets:   buckets,
-		size:      size,
-		portStats: make(map[uint16]PortTraffic),
-		ipStats:   make(map[string]Traffic),
-		Rank:      rank,
+		buckets:       buckets,
+		size:          size,
+		portStats:     make(map[uint16]PortTraffic),
+		ipStats:       make(map[string]Traffic),
+		Rank:          rank,
+		srcToDstStats: make(map[string]map[string]bool),
+		dstToSrcStats: make(map[string]map[string]bool),
 	}
 }
 
 func (w *Window) Add(traffic Traffic) {
+	if !utils.IsValidIP(traffic.SrcIP) || !utils.IsValidIP(traffic.DstIP) {
+		return
+	}
 	key := getKey(traffic.SrcIP, traffic.DstIP, traffic.Protocol, traffic.DstPort)
 	w.bucketMu.Lock()
 	idx := int(traffic.Timestamp.Unix()/60) % len(w.buckets)
@@ -176,6 +186,15 @@ func (w *Window) Add(traffic Traffic) {
 		}
 		bucket.Stats = make(map[string]Traffic)
 		w.statsMu.Unlock()
+
+		w.freqStatsMu.Lock()
+		for srcIP := range w.srcToDstStats {
+			w.srcToDstStats[srcIP] = make(map[string]bool)
+		}
+		for dstIP := range w.dstToSrcStats {
+			w.dstToSrcStats[dstIP] = make(map[string]bool)
+		}
+		w.freqStatsMu.Unlock()
 	}
 	s := bucket.Stats[key]
 	s.SrcIP = traffic.SrcIP
@@ -203,6 +222,17 @@ func (w *Window) Add(traffic Traffic) {
 	portStat.Protocol = traffic.Protocol
 	w.portStats[traffic.DstPort] = portStat
 	w.statsMu.Unlock()
+
+	w.freqStatsMu.Lock()
+	if _, exists := w.srcToDstStats[traffic.SrcIP]; !exists {
+		w.srcToDstStats[traffic.SrcIP] = make(map[string]bool)
+	}
+	w.srcToDstStats[traffic.SrcIP][traffic.DstIP] = true
+	if _, exists := w.dstToSrcStats[traffic.DstIP]; !exists {
+		w.dstToSrcStats[traffic.DstIP] = make(map[string]bool)
+	}
+	w.dstToSrcStats[traffic.DstIP][traffic.SrcIP] = true
+	w.freqStatsMu.Unlock()
 }
 
 func (w *Window) PortSummary() []PortTraffic {
@@ -409,6 +439,15 @@ func (w *Window) StartCacheUpdate(ctx context.Context, wg *sync.WaitGroup) {
 func Capture(ctx context.Context, device string, pool *async.WorkerPool, w *Window) {
 	handle, err := pcap.OpenLive(device, 2048, true, pcap.BlockForever)
 	if err != nil {
+		notSpecified := strings.Contains(err.Error(), "not been specified")
+		errEth := strings.Contains(err.Error(), "Error opening adapter")
+		notFound := strings.Contains(err.Error(), "No such device exists")
+		if notFound || errEth || notSpecified {
+			fmt.Printf("网卡 %s 不存在或无法打开，请检查配置文件中的网卡名称是否正确。\n", device)
+			fmt.Printf("可用网卡列表：\n")
+			utils.ListAvailableDevices()
+			os.Exit(1)
+		}
 		panic(err)
 	}
 	defer handle.Close()
@@ -463,31 +502,63 @@ func Capture(ctx context.Context, device string, pool *async.WorkerPool, w *Wind
 				return nil
 			}, packet)
 		case <-ticker.C:
-			//【alert】 high bandwidth for single ip
-			var alerts []notify.Ddos
+			now := time.Now().Format(utils.TimeLayout)
+			var (
+				bws []notify.Bandwidth
+				fqs []notify.Frequency
+			)
 			thresholdBytes := getThresholdBytes()
 			w.cacheMu.RLock()
 			for _, s := range w.ipCache {
 				bytes := s.Bytes * getUnitFactor(s.Unit)
-				if bytes > thresholdBytes {
-					if notify.IsWhiteIp(s.IP) {
-						continue
-					}
-					alerts = append(alerts, notify.Ddos{
+				if bytes > thresholdBytes && !notify.IsWhiteIp(s.IP) {
+					bws = append(bws, notify.Bandwidth{
 						IP:        s.IP,
 						Bandwidth: fmt.Sprintf("%.2f%s", s.Bytes, s.Unit),
 					})
 				}
 			}
-			if len(alerts) > 0 {
+			if len(bws) != 0 {
 				notify.Base.Queue(notify.DdosAlert{
-					Alerts:    alerts,
-					Timestamp: time.Now().Format(utils.TimeLayout),
-					Location:  conf.CoreConf.Notify.Location,
-					TimeRange: utils.GetTimeRangeString(conf.CoreConf.Server.Size),
+					BandwidthS: bws,
+					Timestamp:  now,
+					Title:      "大流量预警",
+					Location:   conf.CoreConf.Notify.Location,
+					TimeRange:  utils.GetTimeRangeString(conf.CoreConf.Server.Size),
 				})
 			}
 			w.cacheMu.RUnlock()
+
+			frequencyThreshold := conf.CoreConf.Notify.FrequencyThreshold
+			w.freqStatsMu.RLock()
+			for srcIP, dstIPs := range w.srcToDstStats {
+				if len(dstIPs) > frequencyThreshold && !notify.IsWhiteIp(srcIP) {
+					fqs = append(fqs, notify.Frequency{
+						IP:    srcIP,
+						Count: len(dstIPs),
+						Desc:  fmt.Sprintf("检测到源IP %s 在最近1分钟内尝试连接 %d 个不同目标 IP，疑似异常行为", srcIP, len(dstIPs)),
+					})
+				}
+			}
+			for dstIP, srcIPs := range w.dstToSrcStats {
+				if len(srcIPs) > frequencyThreshold && !notify.IsWhiteIp(dstIP) {
+					fqs = append(fqs, notify.Frequency{
+						IP:    dstIP,
+						Count: len(srcIPs),
+						Desc:  fmt.Sprintf("检测到目标IP %s 在最近1分钟内接收来自 %d 个不同源IP访问请求，疑似异常行为", dstIP, len(srcIPs)),
+					})
+				}
+			}
+			if len(fqs) != 0 {
+				notify.Base.Queue(notify.DdosAlert{
+					FrequencyS: fqs,
+					Timestamp:  now,
+					Title:      "高频请求预警",
+					Location:   conf.CoreConf.Notify.Location,
+					TimeRange:  utils.GetTimeRangeString(1),
+				})
+			}
+			w.freqStatsMu.RUnlock()
 		case <-ctx.Done():
 			return
 		}

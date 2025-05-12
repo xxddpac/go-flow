@@ -38,6 +38,12 @@ go-flow 是一款轻量级、高性能的实时网络流量监控与异常检测
 
 ![Frequency](https://raw.githubusercontent.com/xxddpac/go-flow/main/image/frequency.jpg)
 
+## 持久化
+go-flow 设计初衷是简单轻量化，无需依赖额外组件，默认基于给定滑动窗口在内存中完成实时分析。
+如果需要持久化数据以实现更多功能（如查看最近一周或一个月的流量趋势、生成丰富统计图、结合威胁情报等），go-flow 也支持将流量数据写入 Kafka 队列，供自定义消费与处理。
+只需在配置文件中启用 Kafka 即可，后续的数据存储与分析自行实现。
+![Dashboard](https://raw.githubusercontent.com/xxddpac/go-flow/main/image/dashboard.jpg)
+
 ## 编译
 
 ```

@@ -29,3 +29,7 @@ To = "" # 收件人地址
 From = "" # 发件人地址
 Cc = [""] # 抄送人地址
 
+[kafka]
+Enable = false # 是否启用Kafka，true启用
+Brokers = ["", "", ""] #brokers集群地址
+Topic = "" # topic名称

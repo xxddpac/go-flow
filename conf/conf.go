@@ -23,6 +23,7 @@ type config struct {
 	Mail   Mail
 	WeCom  WeCom
 	Notify Notify
+	Kafka  Kafka
 }
 
 type Server struct {
@@ -56,4 +57,10 @@ type Notify struct {
 	Whitelist          []string
 	Location           string
 	FrequencyThreshold int
+}
+
+type Kafka struct {
+	Brokers []string
+	Topic   string
+	Enable  bool
 }

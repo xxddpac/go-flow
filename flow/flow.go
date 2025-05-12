@@ -4,6 +4,7 @@ import (
 	"container/heap"
 	"context"
 	"embed"
+	"encoding/json"
 	"fmt"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
@@ -11,6 +12,7 @@ import (
 	ji "github.com/json-iterator/go"
 	"github.com/xxddpac/async"
 	"go-flow/conf"
+	"go-flow/kafka"
 	"go-flow/notify"
 	"go-flow/utils"
 	"net/http"
@@ -86,7 +88,7 @@ func (h *PortTrafficHeap) Pop() interface{} {
 }
 
 type Traffic struct {
-	Timestamp time.Time `json:"-"`
+	Timestamp time.Time `json:"timestamp"`
 	SrcIP     string    `json:"src_ip"`
 	DstIP     string    `json:"dest_ip"`
 	DstPort   uint16    `json:"dest_port"`
@@ -496,6 +498,10 @@ func Capture(ctx context.Context, device string, pool *async.WorkerPool, w *Wind
 					Protocol:  protocol,
 					Bytes:     float64(packetLen),
 					Requests:  1,
+				}
+				if conf.CoreConf.Kafka.Enable {
+					msg, _ := json.Marshal(stats)
+					kafka.Kc.Q(msg)
 				}
 				w.Add(*stats)
 				syncPool.Put(stats)

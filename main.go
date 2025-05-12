@@ -6,6 +6,7 @@ import (
 	"github.com/xxddpac/async"
 	"go-flow/conf"
 	"go-flow/flow"
+	"go-flow/kafka"
 	"go-flow/notify"
 	"go-flow/utils"
 	"go.uber.org/zap"
@@ -56,7 +57,12 @@ func main() {
 		Addr:    fmt.Sprintf(":%d", conf.CoreConf.Server.Port),
 		Handler: mux,
 	}
-
+	if conf.CoreConf.Kafka.Enable {
+		kc := &kafka.Config{Brokers: conf.CoreConf.Kafka.Brokers, Topic: conf.CoreConf.Kafka.Topic, P: pool, Ctx: utils.Ctx}
+		if err := kafka.Init(kc); err != nil {
+			panic(fmt.Sprintf("Init kafka failed: %v", err))
+		}
+	}
 	pool.Wg.Add(4)
 	go notify.Init(utils.Ctx, pool)
 	go window.StartCacheUpdate(utils.Ctx, &pool.Wg)
@@ -85,6 +91,9 @@ func main() {
 			_ = server.Shutdown(utils.Ctx)
 			<-time.After(time.Second)
 			utils.Cancel()
+			if conf.CoreConf.Kafka.Enable {
+				kafka.Close()
+			}
 		}
 	}()
 	pool.Wg.Wait()

@@ -19,16 +19,17 @@
 </p>
 
 
-🚀 快速上手
+🚀 <strong>快速上手</strong>
 
 - 下载最新版本Release
 - 编辑配置文件 `config.toml`
 - 运行 `go-flow`，访问 `http://ip:31415`
-    ```
-    ./go-flow -c config.toml
-    ```
 
-📊 Web UI
+```
+./go-flow -c config.toml
+```
+
+📊 <strong>Web UI</strong>
 
 - `Sessions` 展示会话级流量，包含源/目的 IP、端口、协议、流量占用和请求次数，便于分析具体通信关系
 
@@ -46,7 +47,7 @@
 
 ![Trend](https://raw.githubusercontent.com/xxddpac/go-flow/main/image/trend.jpg)
 
-🚨 风险预警
+🚨 <strong>风险预警</strong>
 
 - `大流量预警` 计算滑动窗口内的流量总和，识别异常大流量
   ![Bandwidth](https://raw.githubusercontent.com/xxddpac/go-flow/main/image/bandwidth.jpg)
@@ -54,7 +55,7 @@
 - `高频扫描预警` 识别高频扫描或分布式探测
   ![Frequency](https://raw.githubusercontent.com/xxddpac/go-flow/main/image/frequency.jpg)
 
-💾 数据持久化
+💾 <strong>数据持久化</strong>
 
 `go-flow` 设计初衷是简单轻量化，无需依赖额外组件，默认基于给定滑动窗口在内存中完成实时分析。
 如果需要持久化数据以实现更多功能（如查看最近一周或一个月的流量趋势、生成丰富统计图、结合威胁情报等），`go-flow` 也支持将流量数据写入
@@ -62,7 +63,7 @@ Kafka 队列，供自定义消费与处理。
 只需在配置文件中启用 Kafka 即可，后续的数据存储与分析自行实现。
 ![Dashboard](https://raw.githubusercontent.com/xxddpac/go-flow/main/image/dashboard.jpg)
 
-🛠️ 源码编译
+🛠️ <strong>源码编译</strong>
 
 ```
 git clone https://github.com/xxddpac/go-flow.git

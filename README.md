@@ -9,9 +9,9 @@
 
 <h1 align="center">GO-FLOW</h1>
 
-<p align="center">
+<h3 align="center">
   <strong>轻量级、高性能的实时网络流量监控与异常检测工具</strong>
-</p>
+</h3>
 
 <p align="center">
 基于可配置的滑动时间窗口进行流量分析，并提供简洁直观的 Web 控制台，方便实时查看网络态势。
@@ -19,17 +19,21 @@
 </p>
 
 
-🚀 <strong>快速上手</strong>
+## 🚀 安装运行
 
-- 下载最新版本Release
-- 编辑配置文件 `config.toml`
-- 运行 `go-flow`，访问 `http://ip:31415`
+1. **下载最新版本 Release**  
+   从 GitHub Releases 页面获取最新版本的 `go-flow` 二进制文件。
 
-```
-./go-flow -c config.toml
-```
+2. **编辑配置文件 `config.toml`**  
+   根据需求修改 `config.toml`，配置网络接口、告警设置等参数
 
-📊 <strong>Web UI</strong>
+3. **运行 `go-flow` 并访问**  
+   执行以下命令启动服务，并通过浏览器访问 `http://<server_ip>:31415` 查看 Web 控制台：
+   ``` 
+   ./go-flow -c config.toml
+    ```
+
+## 📊 Web UI
 
 - `Sessions` 展示会话级流量，包含源/目的 IP、端口、协议、流量占用和请求次数，便于分析具体通信关系
 
@@ -47,7 +51,7 @@
 
 ![Trend](https://raw.githubusercontent.com/xxddpac/go-flow/main/image/trend.jpg)
 
-🚨 <strong>风险预警</strong>
+## 🚨 风险预警
 
 - `大流量预警` 计算滑动窗口内的流量总和，识别异常大流量
   ![Bandwidth](https://raw.githubusercontent.com/xxddpac/go-flow/main/image/bandwidth.jpg)
@@ -55,7 +59,7 @@
 - `高频扫描预警` 识别高频扫描或分布式探测
   ![Frequency](https://raw.githubusercontent.com/xxddpac/go-flow/main/image/frequency.jpg)
 
-💾 <strong>数据持久化</strong>
+## 💾 数据持久化
 
 `go-flow` 设计初衷是简单轻量化，无需依赖额外组件，默认基于给定滑动窗口在内存中完成实时分析。
 如果需要持久化数据以实现更多功能（如查看最近一周或一个月的流量趋势、生成丰富统计图、结合威胁情报等），`go-flow` 也支持将流量数据写入
@@ -63,7 +67,7 @@ Kafka 队列，供自定义消费与处理。
 只需在配置文件中启用 Kafka 即可，后续的数据存储与分析自行实现。
 ![Dashboard](https://raw.githubusercontent.com/xxddpac/go-flow/main/image/dashboard.jpg)
 
-🛠️ <strong>源码编译</strong>
+## 🛠️ 源码编译
 
 ```
 git clone https://github.com/xxddpac/go-flow.git

@@ -28,8 +28,8 @@ func Init(config *Config) error {
 		for {
 			select {
 			case msg := <-producer.Successes():
-				value, _ := msg.Value.Encode()
-				zlog.Infof("Kafka", "topic: %s, partition: %d, offset: %d, value: %s", msg.Topic, msg.Partition, msg.Offset, string(value))
+				//value, _ := msg.Value.Encode()
+				//zlog.Infof("Kafka", "topic: %s, partition: %d, offset: %d, value: %s", msg.Topic, msg.Partition, msg.Offset, string(value))
 				_ = msg
 			case err = <-producer.Errors():
 				zlog.Errorf("Kafka", "Failed to send message: %s", err.Error())

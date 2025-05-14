@@ -1,0 +1,70 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Install dependencies for Linux build
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc libpcap-dev
+
+      - name: Build for Linux
+        run: |
+          mkdir -p bin
+          CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -a -o bin/go-flow .
+
+      - name: Build for Windows
+        run: |
+          mkdir -p bin
+          CGO_ENABLED=1 GOOS=windows GOARCH=amd64 go build -a -o bin/go-flow.exe .
+
+      - name: Package Linux ZIP
+        run: |
+          mkdir -p release
+          cp bin/go-flow release/
+          cp config.toml release/
+          cd release
+          zip -r go_flow_linux.zip go-flow config.toml
+          mv go_flow_linux.zip ../
+          cd ..
+
+      - name: Package Windows ZIP
+        run: |
+          mkdir -p release
+          cp bin/go-flow.exe release/
+          cp config.toml release/
+          cd release
+          zip -r go_flow_windows.zip go-flow.exe config.toml
+          mv go_flow_windows.zip ../
+          cd ..
+
+      - name: Get commit message
+        id: get_commit
+        run: |
+          COMMIT_MESSAGE=$(git log -1 --pretty=%B)
+          echo "message=$COMMIT_MESSAGE" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            go_flow_linux.zip
+            go_flow_windows.zip
+          body: ${{ steps.get_commit.outputs.message }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

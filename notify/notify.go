@@ -1,33 +1,30 @@
 package notify
 
 import (
-	"context"
-	"github.com/xxddpac/async"
 	"go-flow/conf"
+	"go-flow/utils"
+	"go-flow/zlog"
+	"sync"
 )
 
 type Notify interface {
 	Send(d DdosAlert) error
 }
 
-var _ Notify = (*Mail)(nil)
-var _ Notify = (*WeCom)(nil)
+var (
+	_ Notify = (*Mail)(nil)
+	_ Notify = (*WeCom)(nil)
+)
 
 var (
 	ns             = make([]Notify, 0, 10)
 	ddosChan       = make(chan DdosAlert, 100)
-	Base           *base
 	isNotifyEnable bool
 	whitelist      []string
 )
 
-type base struct {
-	p *async.WorkerPool
-}
-
-func Init(ctx context.Context, p *async.WorkerPool) {
-	defer p.Wg.Done()
-	Base = &base{p: p}
+func Init(wg *sync.WaitGroup) {
+	defer wg.Done()
 	whitelist = conf.CoreConf.Notify.Whitelist
 	isNotifyEnable = conf.CoreConf.Notify.Enable
 	if conf.CoreConf.Mail.Enable {
@@ -38,9 +35,8 @@ func Init(ctx context.Context, p *async.WorkerPool) {
 	}
 	for {
 		select {
-		case <-ctx.Done():
+		case <-utils.Ctx.Done():
 			close(ddosChan)
-			p.Logger.Printf("notify quit")
 			return
 		case d := <-ddosChan:
 			if !isNotifyEnable {
@@ -48,7 +44,7 @@ func Init(ctx context.Context, p *async.WorkerPool) {
 			}
 			for _, n := range ns {
 				if err := n.Send(d); err != nil {
-					p.Logger.Printf("notify send err: %v", err)
+					zlog.Errorf("Notify", "send notify error: %v", err)
 				}
 			}
 		}
@@ -75,11 +71,11 @@ type DdosAlert struct {
 	TimeRange  string
 }
 
-func (b *base) Queue(d DdosAlert) {
+func Push(d DdosAlert) {
 	select {
 	case ddosChan <- d:
 	default:
-		b.p.Logger.Printf("notify channel full, drop %v", d)
+		zlog.Warnf("Notify", "notify queue is full, dropping message")
 	}
 }
 

@@ -2,27 +2,37 @@ package kafka
 
 import (
 	"fmt"
-	"github.com/xxddpac/async"
-	"go-flow/conf"
 	"go-flow/utils"
+	"go-flow/zlog"
 	"testing"
 	"time"
 )
 
-func TestKafka(t *testing.T) {
-	conf.Init("../config.toml")
-	config := &Config{
-		Brokers: conf.CoreConf.Kafka.Brokers,
-		Topic:   conf.CoreConf.Kafka.Topic,
-		P:       async.New(),
-		Ctx:     utils.Ctx,
+var (
+	fakeKafkaConfig = &Config{
+		Enable:  true,
+		Brokers: []string{"localhost:9092"},
+		Topic:   "go-flow",
+		Size:    100,
 	}
-	if err = Init(config); err != nil {
+	fakeLogConfig = &zlog.Config{
+		LogLevel:   "debug",
+		Compress:   true,
+		MaxSize:    10,
+		MaxBackups: 5,
+		MaxAge:     30,
+		Format:     "json",
+	}
+)
+
+func TestKafka(t *testing.T) {
+	zlog.Init(zlog.NewZLog(fakeLogConfig))
+	if err = Init(fakeKafkaConfig); err != nil {
 		t.Fatal(err)
 	}
 	go func() {
 		for {
-			config.Q([]byte(fmt.Sprintf(`"msg":"test","timestamp":%s`, time.Now().Format(utils.TimeLayout))))
+			Push([]byte(fmt.Sprintf("test %s", time.Now().Format(utils.TimeLayout))))
 			time.Sleep(10 * time.Millisecond)
 		}
 	}()

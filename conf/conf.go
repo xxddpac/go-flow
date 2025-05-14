@@ -3,6 +3,8 @@ package conf
 import (
 	"fmt"
 	"github.com/BurntSushi/toml"
+	"go-flow/kafka"
+	"go-flow/zlog"
 	"os"
 )
 
@@ -23,7 +25,8 @@ type config struct {
 	Mail   Mail
 	WeCom  WeCom
 	Notify Notify
-	Kafka  Kafka
+	Kafka  kafka.Config
+	Log    zlog.Config
 }
 
 type Server struct {
@@ -57,10 +60,4 @@ type Notify struct {
 	Whitelist          []string
 	Location           string
 	FrequencyThreshold int
-}
-
-type Kafka struct {
-	Brokers []string
-	Topic   string
-	Enable  bool
 }

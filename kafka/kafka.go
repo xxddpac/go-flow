@@ -2,14 +2,15 @@ package kafka
 
 import (
 	"github.com/Shopify/sarama"
+	"go-flow/utils"
+	"go-flow/zlog"
 	"time"
 )
 
 var (
 	producer sarama.AsyncProducer
 	err      error
-	Queue    = make(chan []byte, 10000)
-	Kc       *Config
+	Queue    chan []byte
 )
 
 func Init(config *Config) error {
@@ -22,17 +23,17 @@ func Init(config *Config) error {
 	if err != nil {
 		return err
 	}
-	Kc = config
+	Queue = make(chan []byte, config.Size)
 	go func() {
 		for {
 			select {
 			case msg := <-producer.Successes():
-				//value, _ := msg.Value.Encode()
-				//Kc.P.Logger.Printf("Send msg to kafka success, topic:%s, partition:%d, offset:%d,msg:%s\n", msg.Topic, msg.Partition, msg.Offset, string(value))
+				value, _ := msg.Value.Encode()
+				zlog.Infof("Kafka", "topic: %s, partition: %d, offset: %d, value: %s", msg.Topic, msg.Partition, msg.Offset, string(value))
 				_ = msg
 			case err = <-producer.Errors():
-				Kc.P.Logger.Printf("Failed to send message: %s", err.Error())
-			case <-Kc.Ctx.Done():
+				zlog.Errorf("Kafka", "Failed to send message: %s", err.Error())
+			case <-utils.Ctx.Done():
 				return
 			}
 		}
@@ -41,8 +42,8 @@ func Init(config *Config) error {
 		for {
 			select {
 			case msg := <-Queue:
-				Kc.send(msg)
-			case <-Kc.Ctx.Done():
+				producer.Input() <- &sarama.ProducerMessage{Topic: config.Topic, Value: sarama.StringEncoder(msg)}
+			case <-utils.Ctx.Done():
 				return
 			}
 		}
@@ -50,18 +51,17 @@ func Init(config *Config) error {
 	return nil
 }
 
-func Close() {
-	producer.AsyncClose()
-}
-
-func (c *Config) Q(msg []byte) {
+func Push(msg []byte) {
 	select {
 	case Queue <- msg:
 	default:
-		c.P.Logger.Printf("Kafka queue is full, dropping message: %s", string(msg))
+		zlog.Warnf("Kafka", "Kafka queue is full, dropping message")
 	}
 }
 
-func (c *Config) send(msg []byte) {
-	producer.Input() <- &sarama.ProducerMessage{Topic: c.Topic, Value: sarama.StringEncoder(msg)}
+func Close() {
+	if producer == nil {
+		return
+	}
+	producer.AsyncClose()
 }

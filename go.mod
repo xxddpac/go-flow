@@ -4,15 +4,16 @@ go 1.21.4
 
 require (
 	github.com/BurntSushi/toml v1.5.0
+	github.com/Shopify/sarama v1.24.1
 	github.com/google/gopacket v1.1.19
 	github.com/json-iterator/go v1.1.12
 	github.com/xxddpac/async v1.0.3
 	go.uber.org/zap v1.27.0
 	gopkg.in/gomail.v2 v2.0.0-20160411212932-81ebce5c23df
+	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 )
 
 require (
-	github.com/Shopify/sarama v1.24.1 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/eapache/go-resiliency v1.1.0 // indirect
 	github.com/eapache/go-xerial-snappy v0.0.0-20180814174437-776d5712da21 // indirect
@@ -21,6 +22,7 @@ require (
 	github.com/hashicorp/go-uuid v1.0.1 // indirect
 	github.com/jcmturner/gofork v0.0.0-20190328161633-dc7c13fece03 // indirect
 	github.com/klauspost/compress v1.8.2 // indirect
+	github.com/klauspost/cpuid v1.3.1 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180228061459-e0a39a4cb421 // indirect
 	github.com/modern-go/reflect2 v1.0.2 // indirect
 	github.com/pierrec/lz4 v2.2.6+incompatible // indirect

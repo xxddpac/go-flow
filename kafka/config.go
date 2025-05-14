@@ -1,13 +1,8 @@
 package kafka
 
-import (
-	"context"
-	"github.com/xxddpac/async"
-)
-
 type Config struct {
+	Enable  bool
 	Brokers []string
 	Topic   string
-	P       *async.WorkerPool
-	Ctx     context.Context
+	Size    int
 }

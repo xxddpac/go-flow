@@ -31,5 +31,15 @@ Cc = [""] # 抄送人地址
 
 [kafka]
 Enable = false # 是否启用Kafka，true启用
-Brokers = ["", "", ""] #brokers集群地址
+Brokers = ["", "", ""] # brokers集群地址
 Topic = "" # topic名称
+Size = 20000 # Kafka消息队列大小
+
+[log]
+LogPath = "" # 日志路径，为空将输出控制台
+LogLevel = "debug" # 日志级别
+MaxSize = 10 # 日志文件大小(MB)
+Compress = true # 是否压缩日志文件
+MaxAge = 7 # 日志文件保存天数
+MaxBackups = 10 # 日志文件保留个数
+Format = "json" # 日志格式，json或text

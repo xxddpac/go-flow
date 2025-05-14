@@ -2,7 +2,6 @@ package flow
 
 import (
 	"container/heap"
-	"context"
 	"embed"
 	"encoding/json"
 	"fmt"
@@ -24,6 +23,11 @@ import (
 )
 
 var syncPool = sync.Pool{New: func() interface{} { return &Traffic{} }}
+
+const (
+	highFrequency = "高频请求预警"
+	highBandwidth = "大流量预警"
+)
 
 type TrafficHeap []Traffic
 
@@ -164,9 +168,6 @@ func NewWindow(size time.Duration, rank int) *Window {
 }
 
 func (w *Window) Add(traffic Traffic) {
-	if !utils.IsValidIP(traffic.SrcIP) || !utils.IsValidIP(traffic.DstIP) {
-		return
-	}
 	key := getKey(traffic.SrcIP, traffic.DstIP, traffic.Protocol, traffic.DstPort)
 	w.bucketMu.Lock()
 	idx := int(traffic.Timestamp.Unix()/60) % len(w.buckets)
@@ -414,7 +415,7 @@ func (w *Window) TrendSummary() []TrendItem {
 	return result
 }
 
-func (w *Window) StartCacheUpdate(ctx context.Context, wg *sync.WaitGroup) {
+func (w *Window) StartCacheUpdate(wg *sync.WaitGroup) {
 	defer wg.Done()
 	ticker := time.NewTicker(2 * time.Second)
 	for {
@@ -431,14 +432,14 @@ func (w *Window) StartCacheUpdate(ctx context.Context, wg *sync.WaitGroup) {
 			w.trendCache = trendResult
 			w.lastCalc = time.Now()
 			w.cacheMu.Unlock()
-		case <-ctx.Done():
+		case <-utils.Ctx.Done():
 			ticker.Stop()
 			return
 		}
 	}
 }
 
-func Capture(ctx context.Context, device string, pool *async.WorkerPool, w *Window) {
+func Capture(device string, pool *async.WorkerPool, w *Window) {
 	handle, err := pcap.OpenLive(device, 2048, true, pcap.BlockForever)
 	if err != nil {
 		notSpecified := strings.Contains(err.Error(), "not been specified")
@@ -488,6 +489,9 @@ func Capture(ctx context.Context, device string, pool *async.WorkerPool, w *Wind
 				} else {
 					return nil
 				}
+				if !utils.IsValidIP(ipStr) || !utils.IsValidIP(dstIP) {
+					return nil
+				}
 				packetLen := int64(pt.Metadata().Length)
 				stats := syncPool.Get().(*Traffic)
 				*stats = Traffic{
@@ -501,7 +505,7 @@ func Capture(ctx context.Context, device string, pool *async.WorkerPool, w *Wind
 				}
 				if conf.CoreConf.Kafka.Enable {
 					msg, _ := json.Marshal(stats)
-					kafka.Kc.Q(msg)
+					kafka.Push(msg)
 				}
 				w.Add(*stats)
 				syncPool.Put(stats)
@@ -525,10 +529,10 @@ func Capture(ctx context.Context, device string, pool *async.WorkerPool, w *Wind
 				}
 			}
 			if len(bws) != 0 {
-				notify.Base.Queue(notify.DdosAlert{
+				notify.Push(notify.DdosAlert{
 					BandwidthS: bws,
 					Timestamp:  now,
-					Title:      "大流量预警",
+					Title:      highBandwidth,
 					Location:   conf.CoreConf.Notify.Location,
 					TimeRange:  utils.GetTimeRangeString(conf.CoreConf.Server.Size),
 				})
@@ -556,16 +560,16 @@ func Capture(ctx context.Context, device string, pool *async.WorkerPool, w *Wind
 				}
 			}
 			if len(fqs) != 0 {
-				notify.Base.Queue(notify.DdosAlert{
+				notify.Push(notify.DdosAlert{
 					FrequencyS: fqs,
 					Timestamp:  now,
-					Title:      "高频请求预警",
+					Title:      highFrequency,
 					Location:   conf.CoreConf.Notify.Location,
 					TimeRange:  utils.GetTimeRangeString(1),
 				})
 			}
 			w.freqStatsMu.RUnlock()
-		case <-ctx.Done():
+		case <-utils.Ctx.Done():
 			return
 		}
 	}

@@ -638,6 +638,11 @@ type TrendResponse struct {
 	WindowSize int         `json:"window_size"`
 }
 
+type SysResponse struct {
+	NetworkInterface string `json:"network_interface"`
+	LocalIp          string `json:"local_ip"`
+}
+
 func (w *Window) ServeHTTP(wr http.ResponseWriter, r *http.Request) {
 	if r.URL.Path == "/top" {
 		w.cacheMu.RLock()
@@ -734,6 +739,17 @@ func (w *Window) ServeHTTP(wr http.ResponseWriter, r *http.Request) {
 		response := TrendResponse{
 			Data:       trend,
 			WindowSize: int(w.size.Seconds()),
+		}
+		wr.Header().Set("Content-Type", "application/json")
+		if err := ji.NewEncoder(wr).Encode(response); err != nil {
+			http.Error(wr, "Failed to encode JSON", http.StatusInternalServerError)
+		}
+		return
+	}
+	if r.URL.Path == "/sys" {
+		response := SysResponse{
+			NetworkInterface: conf.CoreConf.Server.Eth,
+			LocalIp:          utils.LocalIp,
 		}
 		wr.Header().Set("Content-Type", "application/json")
 		if err := ji.NewEncoder(wr).Encode(response); err != nil {

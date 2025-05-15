@@ -15,12 +15,14 @@ const (
 )
 
 var (
-	Ctx    context.Context
-	Cancel context.CancelFunc
+	Ctx     context.Context
+	Cancel  context.CancelFunc
+	LocalIp string
 )
 
 func init() {
 	Ctx, Cancel = context.WithCancel(context.Background())
+	LocalIp = GetLocalIp()
 }
 
 var PortMapping = map[string]string{
@@ -113,4 +115,52 @@ func ListAvailableDevices() {
 		}
 		fmt.Println()
 	}
+}
+
+func GetLocalIp() string {
+	var (
+		err         error
+		localIpAddr string
+		ifs         []net.Interface
+		as          []net.Addr
+	)
+	if localIpAddr != "" {
+		return localIpAddr
+	}
+	ifs, err = net.Interfaces()
+	if err != nil {
+		return "Unknown"
+	}
+	for _, i := range ifs {
+		if i.Flags&net.FlagUp == 0 {
+			continue
+		}
+		if i.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		as, err = i.Addrs()
+		if err != nil {
+			return "Unknown"
+		}
+		for _, addr := range as {
+			var ip net.IP
+			switch v := addr.(type) {
+			case *net.IPNet:
+				ip = v.IP
+			case *net.IPAddr:
+				ip = v.IP
+			}
+			if ip == nil || ip.IsLoopback() {
+				continue
+			}
+			ip = ip.To4()
+
+			if ip == nil {
+				continue
+			}
+			localIpAddr = ip.String()
+			return localIpAddr
+		}
+	}
+	return "Unknown"
 }

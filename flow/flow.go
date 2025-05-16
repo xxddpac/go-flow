@@ -96,7 +96,7 @@ type Traffic struct {
 	Timestamp time.Time `json:"timestamp"`
 	SrcIP     string    `json:"src_ip"`
 	DstIP     string    `json:"dest_ip"`
-	DstPort   uint16    `json:"dest_port"`
+	DstPort   string    `json:"dest_port"`
 	Protocol  string    `json:"protocol"`
 	Bytes     float64   `json:"bandwidth"`
 	Requests  int64     `json:"requests"`
@@ -112,7 +112,7 @@ type IPTraffic struct {
 
 type PortTraffic struct {
 	Protocol string  `json:"protocol"`
-	DstPort  uint16  `json:"dest_port"`
+	DstPort  string  `json:"dest_port"`
 	Bytes    float64 `json:"bytes"`
 	Unit     string  `json:"unit"`
 }
@@ -141,7 +141,7 @@ type Window struct {
 	cacheMu       sync.RWMutex
 	lastCalc      time.Time
 	Rank          int
-	portStats     map[uint16]PortTraffic
+	portStats     map[string]PortTraffic
 	portCache     []PortTraffic
 	srcToDstStats map[string]map[string]bool
 	dstToSrcStats map[string]map[string]bool
@@ -160,7 +160,7 @@ func NewWindow(size time.Duration, rank int) *Window {
 	return &Window{
 		buckets:       buckets,
 		size:          size,
-		portStats:     make(map[uint16]PortTraffic),
+		portStats:     make(map[string]PortTraffic),
 		ipStats:       make(map[string]Traffic),
 		Rank:          rank,
 		srcToDstStats: make(map[string]map[string]bool),
@@ -241,7 +241,7 @@ func (w *Window) Add(traffic Traffic) {
 
 func (w *Window) PortSummary() []PortTraffic {
 	w.statsMu.RLock()
-	portStats := make(map[uint16]PortTraffic, len(w.portStats))
+	portStats := make(map[string]PortTraffic, len(w.portStats))
 	totalBytes := 0.0
 	for port, s := range w.portStats {
 		if s.Bytes > 0 {
@@ -471,7 +471,7 @@ func Capture(device string, pool *async.WorkerPool, w *Window) {
 			pool.Add(func(args ...interface{}) error {
 				pt := args[0].(gopacket.Packet)
 				var ipStr, dstIP, protocol string
-				var dstPort uint16
+				var dstPort string
 				if ipLayer := pt.Layer(layers.LayerTypeIPv4); ipLayer != nil {
 					ip, _ := ipLayer.(*layers.IPv4)
 					ipStr = ip.SrcIP.String()
@@ -482,11 +482,11 @@ func Capture(device string, pool *async.WorkerPool, w *Window) {
 				if tcpLayer := pt.Layer(layers.LayerTypeTCP); tcpLayer != nil {
 					tcp, _ := tcpLayer.(*layers.TCP)
 					protocol = "TCP"
-					dstPort = uint16(tcp.DstPort)
+					dstPort = tcp.DstPort.String()
 				} else if udpLayer := pt.Layer(layers.LayerTypeUDP); udpLayer != nil {
 					udp, _ := udpLayer.(*layers.UDP)
 					protocol = "UDP"
-					dstPort = uint16(udp.DstPort)
+					dstPort = udp.DstPort.String()
 				} else {
 					return nil
 				}
@@ -576,7 +576,7 @@ func Capture(device string, pool *async.WorkerPool, w *Window) {
 	}
 }
 
-func getKey(ip, dstIP, protocol string, dstPort uint16) string {
+func getKey(ip, dstIP, protocol string, dstPort string) string {
 	return fmt.Sprintf("%s|%s|%s|%d", ip, dstIP, protocol, dstPort)
 }
 
@@ -702,21 +702,10 @@ func (w *Window) ServeHTTP(wr http.ResponseWriter, r *http.Request) {
 		w.cacheMu.RUnlock()
 		resp := make([]TopItem, len(top))
 		for i, s := range top {
-			var (
-				ok      bool
-				service string
-				portStr = fmt.Sprintf("%d", s.DstPort)
-			)
-			service, ok = utils.PortMapping[portStr]
-			if !ok {
-				service = portStr
-			} else {
-				service = fmt.Sprintf("%s / %s", portStr, service)
-			}
 			resp[i] = TopItem{
 				SrcIP:     s.SrcIP,
 				DstIP:     s.DstIP,
-				DstPort:   service,
+				DstPort:   s.DstPort,
 				Protocol:  s.Protocol,
 				Bandwidth: s.Bytes,
 				Unit:      s.Unit,
@@ -760,19 +749,8 @@ func (w *Window) ServeHTTP(wr http.ResponseWriter, r *http.Request) {
 		w.cacheMu.RUnlock()
 		response := make([]PortResponse, len(top))
 		for i, s := range top {
-			var (
-				ok      bool
-				dPort   string
-				portStr = fmt.Sprintf("%d", s.DstPort)
-			)
-			dPort, ok = utils.PortMapping[portStr]
-			if !ok {
-				dPort = portStr
-			} else {
-				dPort = fmt.Sprintf("%s / %s", portStr, dPort)
-			}
 			response[i] = PortResponse{
-				DstPort:  dPort,
+				DstPort:  s.DstPort,
 				Bytes:    s.Bytes,
 				Protocol: s.Protocol,
 				Unit:     s.Unit,

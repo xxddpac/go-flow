@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"github.com/google/gopacket/pcap"
+	"github.com/shirou/gopsutil/v3/cpu"
+	"github.com/shirou/gopsutil/v3/mem"
 	"net"
 	"strings"
 	"time"
@@ -15,14 +17,12 @@ const (
 )
 
 var (
-	Ctx     context.Context
-	Cancel  context.CancelFunc
-	LocalIp string
+	Ctx    context.Context
+	Cancel context.CancelFunc
 )
 
 func init() {
 	Ctx, Cancel = context.WithCancel(context.Background())
-	LocalIp = GetLocalIp()
 }
 
 var PortMapping = map[string]string{
@@ -161,6 +161,22 @@ func GetLocalIp() string {
 			localIpAddr = ip.String()
 			return localIpAddr
 		}
+	}
+	return "Unknown"
+}
+
+func GetCpuUsage() string {
+	percent, _ := cpu.Percent(time.Second, false)
+	if len(percent) > 0 {
+		return fmt.Sprintf("%.2f%%", percent[0])
+	}
+	return "Unknown"
+}
+
+func GetMemUsage() string {
+	v, _ := mem.VirtualMemory()
+	if v != nil {
+		return fmt.Sprintf("%.2f%%", v.UsedPercent)
 	}
 	return "Unknown"
 }

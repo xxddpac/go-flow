@@ -63,7 +63,10 @@
         const [tab, setTab] = useState('traffic');
         const canvasRef = useRef(null);
         const [eth, setEth] = useState("");
-        const [ip, setIp] = useState("");
+        const [cpu, setCpu] = useState("");
+        const [mem, setMem] = useState("");
+        const [workers, setGoroutines] = useState(0);
+        const [ip,setIp] = useState("");
 
         const formatDateTime = (unixSeconds) => {
             const date = new Date(unixSeconds * 1000);
@@ -112,6 +115,9 @@
                 const sysJson = await sysResponse.json();
                 setEth(sysJson.network_interface);
                 setIp(sysJson.local_ip);
+                setMem(sysJson.mem);
+                setCpu(sysJson.cpu);
+                setGoroutines(sysJson.workers);
 
                 let dataArray = [];
                 if (tab === 'traffic') {
@@ -359,7 +365,27 @@
             <div className="container mx-auto p-4">
                 <div className="bg-white shadow-md rounded-lg p-6 relative">
                     <div className="flex justify-between items-center mb-4">
-                        <h1 className="text-2xl font-bold">【GO-FLOW】 Ranks Top {rank}</h1>
+                        <h1 className="text-2xl font-bold flex items-center">
+                            Top {rank} Rankings by Real-Time Traffic
+                            <span className="ml-2">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" className="size-6">
+      <defs>
+        <linearGradient id="fireGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+          <stop offset="0%" stopColor="#facc15" />   {/* yellow-400 */}
+            <stop offset="50%" stopColor="#fb923c" />  {/* orange-400 */}
+            <stop offset="100%" stopColor="#ef4444" /> {/* red-500 */}
+        </linearGradient>
+      </defs>
+      <path
+          fill="url(#fireGradient)"
+          fillRule="evenodd"
+          d="M12.963 2.286a.75.75 0 0 0-1.071-.136 9.742 9.742 0 0 0-3.539 6.176 7.547 7.547 0 0 1-1.705-1.715.75.75 0 0 0-1.152-.082A9 9 0 1 0 15.68 4.534a7.46 7.46 0 0 1-2.717-2.248ZM15.75 14.25a3.75 3.75 0 1 1-7.313-1.172c.628.465 1.35.81 2.133 1a5.99 5.99 0 0 1 1.925-3.546 3.75 3.75 0 0 1 3.255 3.718Z"
+          clipRule="evenodd"
+      />
+    </svg>
+  </span>
+                        </h1>
+
                         <button
                             onClick={fetchData}
                             disabled={loading}
@@ -414,7 +440,7 @@
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z"/>
                 </svg>
             </span>
-                                Current Time Window {getTimeRange()}
+                                Current Time Window&nbsp;&nbsp;<span className="bg-white/60 text-gray-800 font-medium px-1 rounded">{getTimeRange()}</span>
                             </p>
                             <p className="text-xl font-semibold text-gray-700 bg-gray-100 p-3 rounded-md mb-4 flex items-center">
             <span
@@ -427,8 +453,22 @@
                 </svg>
             </span>
                                 <span>
-                Capturing traffic on network interface <span className="text-green-600">{eth}</span> at server <span
-                                    className="text-green-600">{ip}</span>
+                Capturing traffic on network interface <span className="bg-white/60 text-gray-800 font-medium px-1 rounded">{eth}</span>  at <span className="bg-white/60 text-gray-800 font-medium px-1 rounded">{ip}</span>
+            </span>
+                            </p>
+                            <p className="text-xl font-semibold text-gray-700 bg-gray-100 p-3 rounded-md mb-4 flex items-center">
+            <span
+                className="inline-flex items-center bg-yellow-500 text-white text-sm font-medium px-2.5 py-0.5 rounded-full mr-2 animate-pulse"
+            >
+                <svg className="h-4 w-4 mr-1" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"
+                     stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                          d="M11.622 1.602a.75.75 0 0 1 .756 0l2.25 1.313a.75.75 0 0 1-.756 1.295L12 3.118 10.128 4.21a.75.75 0 1 1-.756-1.295l2.25-1.313ZM5.898 5.81a.75.75 0 0 1-.27 1.025l-1.14.665 1.14.665a.75.75 0 1 1-.756 1.295L3.75 8.806v.944a.75.75 0 0 1-1.5 0V7.5a.75.75 0 0 1 .372-.648l2.25-1.312a.75.75 0 0 1 1.026.27Zm12.204 0a.75.75 0 0 1 1.026-.27l2.25 1.312a.75.75 0 0 1 .372.648v2.25a.75.75 0 0 1-1.5 0v-.944l-1.122.654a.75.75 0 1 1-.756-1.295l1.14-.665-1.14-.665a.75.75 0 0 1-.27-1.025Zm-9 5.25a.75.75 0 0 1 1.026-.27L12 11.882l1.872-1.092a.75.75 0 1 1 .756 1.295l-1.878 1.096V15a.75.75 0 0 1-1.5 0v-1.82l-1.878-1.095a.75.75 0 0 1-.27-1.025ZM3 13.5a.75.75 0 0 1 .75.75v1.82l1.878 1.095a.75.75 0 1 1-.756 1.295l-2.25-1.312a.75.75 0 0 1-.372-.648v-2.25A.75.75 0 0 1 3 13.5Zm18 0a.75.75 0 0 1 .75.75v2.25a.75.75 0 0 1-.372.648l-2.25 1.312a.75.75 0 1 1-.756-1.295l1.878-1.096V14.25a.75.75 0 0 1 .75-.75Zm-9 5.25a.75.75 0 0 1 .75.75v.944l1.122-.654a.75.75 0 1 1 .756 1.295l-2.25 1.313a.75.75 0 0 1-.756 0l-2.25-1.313a.75.75 0 1 1 .756-1.295l1.122.654V19.5a.75.75 0 0 1 .75-.75Z"
+                    />
+                </svg>
+            </span>
+                                <span>
+                System usage <span className="bg-white/60 text-gray-800 font-medium px-1 rounded">{mem}</span> memory <span className="bg-white/60 text-gray-800 font-medium px-1 rounded">{cpu}</span> cpu and <span className="bg-white/60 text-gray-800 font-medium px-1 rounded">{workers}</span> goroutines active
             </span>
                             </p>
                         </>

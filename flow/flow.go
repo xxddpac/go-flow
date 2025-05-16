@@ -16,6 +16,7 @@ import (
 	"go-flow/utils"
 	"net/http"
 	"os"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -638,9 +639,60 @@ type TrendResponse struct {
 	WindowSize int         `json:"window_size"`
 }
 
-type SysResponse struct {
+var (
+	systemMonitorManager *SystemMonitorManager
+	localIp              = utils.GetLocalIp()
+)
+
+type SystemMonitor struct {
 	NetworkInterface string `json:"network_interface"`
 	LocalIp          string `json:"local_ip"`
+	Cpu              string `json:"cpu"`
+	Mem              string `json:"mem"`
+	Workers          int    `json:"workers"`
+}
+
+type SystemMonitorManager struct {
+	Mu   sync.RWMutex
+	Data map[string]SystemMonitor
+}
+
+func (s *SystemMonitorManager) Get(key string) SystemMonitor {
+	s.Mu.RLock()
+	defer s.Mu.RUnlock()
+	return s.Data[key]
+}
+
+func (s *SystemMonitorManager) Set(key string, value SystemMonitor) {
+	s.Mu.RLock()
+	defer s.Mu.RUnlock()
+	s.Data[key] = value
+}
+
+func init() {
+	systemMonitorManager = &SystemMonitorManager{
+		Data: make(map[string]SystemMonitor),
+	}
+	go systemMonitorManager.run()
+}
+
+func (s *SystemMonitorManager) run() {
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			s.Set(localIp, SystemMonitor{
+				NetworkInterface: conf.CoreConf.Server.Eth,
+				LocalIp:          localIp,
+				Cpu:              utils.GetCpuUsage(),
+				Mem:              utils.GetMemUsage(),
+				Workers:          runtime.NumGoroutine(),
+			})
+		case <-utils.Ctx.Done():
+			return
+		}
+	}
 }
 
 func (w *Window) ServeHTTP(wr http.ResponseWriter, r *http.Request) {
@@ -747,10 +799,7 @@ func (w *Window) ServeHTTP(wr http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.URL.Path == "/sys" {
-		response := SysResponse{
-			NetworkInterface: conf.CoreConf.Server.Eth,
-			LocalIp:          utils.LocalIp,
-		}
+		response := systemMonitorManager.Get(localIp)
 		wr.Header().Set("Content-Type", "application/json")
 		if err := ji.NewEncoder(wr).Encode(response); err != nil {
 			http.Error(wr, "Failed to encode JSON", http.StatusInternalServerError)

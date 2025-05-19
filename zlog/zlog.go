@@ -100,7 +100,7 @@ type ZLog struct {
 }
 
 func Close() {
-	if defaultLogger != nil {
+	if defaultLogger == nil {
 		return
 	}
 	_ = defaultLogger.provider.Sync()

@@ -53,18 +53,12 @@ jobs:
           mv go_flow_windows.zip ../
           cd ..
 
-      - name: Get commit message
-        id: get_commit
-        run: |
-          COMMIT_MESSAGE=$(git log -1 --pretty=%B)
-          echo "message=$COMMIT_MESSAGE" >> $GITHUB_OUTPUT
-
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
             go_flow_linux.zip
             go_flow_windows.zip
-          body: ${{ steps.get_commit.outputs.message }}
+          body: ""
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

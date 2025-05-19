@@ -7,31 +7,64 @@
 </p>
 
 
-<h1 align="center">GO-FLOW</h1>
+<h1 align="center">🌐🛡️ go-flow</h1>
 
-<h3 align="center">
-  <strong>轻量级、高性能的实时网络流量监控与异常检测工具</strong>
-</h3>
+<p align="center"><strong>轻量级、高性能的实时网络流量监控与异常检测工具</strong></p>
 
 <p align="center">
-基于可配置的滑动时间窗口进行流量分析，并提供简洁直观的 Web 控制台，方便实时查看网络态势。
-内置告警机制可快速识别异常大流量、高频扫描、分布式探测等可疑行为并触发告警，提前预警潜在安全风险。
+部署即用，无需依赖，提供 Web 控制台与告警机制，可快速定位异常流量、扫描行为等潜在风险。
 </p>
 
+## ✨ 项目特点
 
-## 🚀 安装运行
+- 🚀 即装即用，零依赖部署
+- 📊 实时流量监控：会话/IP/端口级别流量排名
+- 📉 流量趋势图：自动生成滑动窗口视图
+- 🚨 异常告警机制：识别大流量、高频扫描等异常行为
 
-1. **下载最新版本 Release**  
-   从 GitHub Releases 页面获取最新版本的 `go-flow` 二进制文件。
+---
 
-2. **编辑配置文件 `config.toml`**  
-   根据需求修改 `config.toml`，配置网络接口、告警设置等参数
+## 🧩 使用场景
 
-3. **运行 `go-flow` 并访问**  
-   执行以下命令启动服务，并通过浏览器访问 `http://<server_ip>:31415` 查看 Web 控制台：
-   ``` 
-   ./go-flow -c config.toml
-    ```
+### 1. 本机流量分析
+```
+部署在主机或容器中，监控自身网络流量，适用于服务节点、办公终端、云主机等环境
+```
+### 2. 核心链路流量旁路分析
+```
+通过交换机端口镜像（Port Mirror / SPAN）或网络 TAP，将边缘设备、网关、防火墙等关键链路流量引导至 go-flow，进行实时分析与异常检测
+```
+
+
+---
+
+## 🚀 快速开始
+
+### 1. 下载 release 包
+
+从 [Releases 页面](https://github.com/xxddpac/go-flow/releases) 下载适合系统的可执行文件。
+
+### 2. 配置 `config.toml`
+
+修改网络接口、告警阈值等：
+
+```toml
+[server]
+Eth = "em0"
+[notify]
+Enable = true
+ThresholdValue = 10
+ThresholdUnit = "GB"
+FrequencyThreshold = 5000
+```
+
+### 3. 启动服务并访问控制台
+
+```
+./go-flow -c config.toml
+```
+
+访问 `http://<server_ip>:31415` 查看控制台页面
 
 ## 📊 Web UI
 
@@ -59,12 +92,27 @@
 - `高频扫描预警` 识别高频扫描或分布式探测
   ![Frequency](https://raw.githubusercontent.com/xxddpac/go-flow/main/image/frequency.jpg)
 
-## 💾 数据持久化
 
-`go-flow` 设计初衷是简单轻量化，无需依赖额外组件，默认基于给定滑动窗口在内存中完成实时分析。
-如果需要持久化数据以实现更多功能（如查看最近一周或一个月的流量趋势、生成丰富统计图、结合威胁情报等），`go-flow` 也支持将流量数据写入
-Kafka 队列，供自定义消费与处理。
-只需在配置文件中启用 Kafka 即可，后续的数据存储与分析自行实现。
+## 💾 数据持久化与扩展
+
+`go-flow` 设计初衷是**简单轻量、开箱即用**，默认采用内存结构，在滑动时间窗口内完成**实时流量分析与异常检测**，无需依赖任何外部组件。
+
+如需进一步实现**数据持久化**与**高级分析功能**，例如：
+
+- 查看最近一周或一个月的流量趋势
+- 生成更丰富的统计图表与报表
+- 结合威胁情报进行行为关联分析
+
+可通过配置文件启用 **Kafka**，将分析结果写入消息队列，供后续系统自由消费与处理。
+
+```
+[kafka]
+Enable = true
+Brokers = ["localhost:9092"]
+Topic = "go-flow"
+```  
+> 🔄 后续分析逻辑（存储、查询、告警等）可按业务需求灵活扩展
+
 ![Dashboard](https://raw.githubusercontent.com/xxddpac/go-flow/main/image/dashboard.jpg)
 
 ## 🛠️ 源码编译

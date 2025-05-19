@@ -7,7 +7,7 @@
 </p>
 
 
-<h1 align="center">🌐🛡️ go-flow</h1>
+<h1 align="center">🌐GO-FLOW</h1>
 
 <p align="center"><strong>轻量级、高性能的实时网络流量监控与异常检测工具</strong></p>
 

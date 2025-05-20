@@ -130,3 +130,19 @@ make build-win
 # Clean build artifacts
 make clean
 ```
+
+## 🚨 问题&解决
+### 启动报错 `error while loading shared libraries: libpcap.so.1: cannot open shared object file`
+
+原因：系统缺少 `libpcap` 运行库。
+
+解决：
+- **CentOS / RHEL / Fedora:**
+
+``` sudo yum install -y libpcap```
+
+- **Debian / Ubuntu:**
+
+``` sudo apt-get install -y libpcap0.8```
+
+- **其他 Linux 发行版**，请使用对应的包管理器安装 `libpcap`

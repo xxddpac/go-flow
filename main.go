@@ -66,10 +66,7 @@ func main() {
 	}()
 	go func() {
 		signals := make(chan os.Signal, 1)
-		signal.Notify(signals, os.Interrupt, os.Kill, syscall.SIGKILL,
-			syscall.SIGHUP, syscall.SIGINT, syscall.SIGQUIT, syscall.SIGILL, syscall.SIGTRAP,
-			syscall.SIGABRT,
-		)
+		signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
 		select {
 		case sig := <-signals:
 			pool.Logger.Printf("Received signal: %v", sig.String())

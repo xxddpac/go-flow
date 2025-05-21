@@ -183,18 +183,20 @@
 
             const canvas = canvasRef.current;
             const ctx = canvas.getContext('2d');
+
+            let hoveredIndex = -1;
+            let animationFrame = null;
+
             const dpr = window.devicePixelRatio || 1;
             canvas.width = canvas.offsetWidth * dpr;
             canvas.height = canvas.offsetHeight * dpr;
             ctx.scale(dpr, dpr);
-
             const width = canvas.offsetWidth;
             const height = canvas.offsetHeight;
             const padding = 50;
             const paddingLeft = 80;
 
             ctx.clearRect(0, 0, width, height);
-
             const bytes = trendData.map(item => item.bytes);
             const timestamps = trendData.map(item => item.timestamp);
             const unit = trendData[0]?.unit || 'MB';
@@ -204,94 +206,162 @@
             const minBytes = Math.min(...bytes, 0);
             const yRange = maxBytes - minBytes;
             const yScale = (height - 2 * padding) / yRange;
-
             const xStep = (width - paddingLeft - padding) / (trendData.length - 1);
 
-            ctx.fillStyle = '#f8fafc';
-            ctx.fillRect(paddingLeft, padding, width - paddingLeft - padding, height - 2 * padding);
+            const drawGrid = () =>{
+                ctx.fillStyle = '#f8fafc';
+                ctx.fillRect(paddingLeft, padding, width - paddingLeft - padding, height - 2 * padding);
 
-            const gradient = ctx.createLinearGradient(0, padding, 0, height - padding);
-            gradient.addColorStop(0, 'rgba(37, 99, 235, 0.4)');
-            gradient.addColorStop(1, 'rgba(37, 99, 235, 0)');
-            ctx.fillStyle = gradient;
-            ctx.beginPath();
-            ctx.moveTo(paddingLeft, height - padding);
-            trendData.forEach((item, i) => {
-                const x = paddingLeft + i * xStep;
-                const y = height - padding - (item.bytes - minBytes) * yScale;
-                if (i === 0) {
-                    ctx.lineTo(x, y);
-                } else {
-                    const prevX = paddingLeft + (i - 1) * xStep;
-                    const prevY = height - padding - (trendData[i - 1].bytes - minBytes) * yScale;
-                    const midX = (prevX + x) / 2;
-                    ctx.quadraticCurveTo(prevX, prevY, midX, (prevY + y) / 2);
-                    ctx.quadraticCurveTo(x, y, x, y);
-                }
-            });
-            ctx.lineTo(paddingLeft + (trendData.length - 1) * xStep, height - padding);
-            ctx.fill();
-
-            ctx.strokeStyle = '#2563eb';
-            ctx.lineWidth = 3;
-            ctx.beginPath();
-            trendData.forEach((item, i) => {
-                const x = paddingLeft + i * xStep;
-                const y = height - padding - (item.bytes - minBytes) * yScale;
-                if (i === 0) {
-                    ctx.moveTo(x, y);
-                } else {
-                    const prevX = paddingLeft + (i - 1) * xStep;
-                    const prevY = height - padding - (trendData[i - 1].bytes - minBytes) * yScale;
-                    const midX = (prevX + x) / 2;
-                    ctx.quadraticCurveTo(prevX, prevY, midX, (prevY + y) / 2);
-                    ctx.quadraticCurveTo(x, y, x, y);
-                }
-            });
-            ctx.stroke();
-
-            ctx.fillStyle = '#1d4ed8';
-            trendData.forEach((item, i) => {
-                const x = paddingLeft + i * xStep;
-                const y = height - padding - (item.bytes - minBytes) * yScale;
+                const gradient = ctx.createLinearGradient(0, padding, 0, height - padding);
+                gradient.addColorStop(0, 'rgba(37, 99, 235, 0.4)');
+                gradient.addColorStop(1, 'rgba(37, 99, 235, 0)');
+                ctx.fillStyle = gradient;
                 ctx.beginPath();
-                ctx.arc(x, y, 5, 0, 2 * Math.PI);
+                ctx.moveTo(paddingLeft, height - padding);
+                trendData.forEach((item, i) => {
+                    const x = paddingLeft + i * xStep;
+                    const y = height - padding - (item.bytes - minBytes) * yScale;
+                    if (i === 0) {
+                        ctx.lineTo(x, y);
+                    } else {
+                        const prevX = paddingLeft + (i - 1) * xStep;
+                        const prevY = height - padding - (trendData[i - 1].bytes - minBytes) * yScale;
+                        const midX = (prevX + x) / 2;
+                        ctx.quadraticCurveTo(prevX, prevY, midX, (prevY + y) / 2);
+                        ctx.quadraticCurveTo(x, y, x, y);
+                    }
+                });
+                ctx.lineTo(paddingLeft + (trendData.length - 1) * xStep, height - padding);
                 ctx.fill();
-                ctx.strokeStyle = '#ffffff';
+
+                ctx.strokeStyle = '#2563eb';
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                trendData.forEach((item, i) => {
+                    const x = paddingLeft + i * xStep;
+                    const y = height - padding - (item.bytes - minBytes) * yScale;
+                    if (i === 0) {
+                        ctx.moveTo(x, y);
+                    } else {
+                        const prevX = paddingLeft + (i - 1) * xStep;
+                        const prevY = height - padding - (trendData[i - 1].bytes - minBytes) * yScale;
+                        const midX = (prevX + x) / 2;
+                        ctx.quadraticCurveTo(prevX, prevY, midX, (prevY + y) / 2);
+                        ctx.quadraticCurveTo(x, y, x, y);
+                    }
+                });
+                ctx.stroke();
+
+                ctx.strokeStyle = '#e5e7eb';
                 ctx.lineWidth = 1;
-                ctx.stroke();
-            });
+                const yTicks = 5;
+                for (let i = 0; i <= yTicks; i++) {
+                    const y = height - padding - (i / yTicks) * (height - 2 * padding);
+                    ctx.beginPath();
+                    ctx.moveTo(paddingLeft, y);
+                    ctx.lineTo(width - padding, y);
+                    ctx.stroke();
+                }
+                trendData.forEach((_, i) => {
+                    const x = paddingLeft + i * xStep;
+                    ctx.beginPath();
+                    ctx.moveTo(x, padding);
+                    ctx.lineTo(x, height - padding);
+                    ctx.stroke();
+                });
 
-            ctx.strokeStyle = '#e5e7eb';
-            ctx.lineWidth = 1;
-            const yTicks = 5;
-            for (let i = 0; i <= yTicks; i++) {
-                const y = height - padding - (i / yTicks) * (height - 2 * padding);
-                ctx.beginPath();
-                ctx.moveTo(paddingLeft, y);
-                ctx.lineTo(width - padding, y);
-                ctx.stroke();
+                ctx.fillStyle = '#1f2937';
+                ctx.font = '12px Arial';
+                ctx.textAlign = 'right';
+                for (let i = 0; i <= yTicks; i++) {
+                    const y = height - padding - (i / yTicks) * (height - 2 * padding);
+                    const value = (minBytes + (i / yTicks) * yRange).toFixed(2);
+                    ctx.fillText(`${value} ${unit}`, paddingLeft - 10, y + 4);
+                }
+
+                ctx.fillStyle = '#1f2937';
+                ctx.font = '12px Arial';
+                ctx.textAlign = 'center';
             }
-            trendData.forEach((_, i) => {
-                const x = paddingLeft + i * xStep;
+
+            const drawDataPoints = () => {
+                ctx.fillStyle = '#1d4ed8';
+                trendData.forEach((item, i) => {
+                    const x = paddingLeft + i * xStep;
+                    const y = height - padding - (item.bytes - minBytes) * yScale;
+                    ctx.beginPath();
+                    ctx.arc(x, y, 4, 0, Math.PI * 2);
+                    ctx.fill();
+                    if (i === hoveredIndex) {
+                    ctx.strokeStyle = '#fff';
+                    ctx.lineWidth = 2;
+                    ctx.stroke();
+                    }
+                });
+            };
+
+            const drawHoverLabel = () => {
+                if (hoveredIndex === -1) {
+                    ctx.clearRect(0, 0, width, height);
+                    drawGrid();
+                    drawDataPoints();
+                }
+                const item = trendData[hoveredIndex];
+                const x = paddingLeft + hoveredIndex * xStep;
+                const y = height - padding - (item.bytes - minBytes) * yScale - 10;
+                ctx.fillStyle = 'rgba(255,255,255,0.9)';
+                ctx.strokeStyle = '#2563eb';
                 ctx.beginPath();
-                ctx.moveTo(x, padding);
-                ctx.lineTo(x, height - padding);
+                ctx.roundRect(x - 40, y - 25, 80, 20, 4);
+                ctx.fill();
                 ctx.stroke();
-            });
 
-            ctx.fillStyle = '#1f2937';
-            ctx.font = '12px Arial';
-            ctx.textAlign = 'right';
-            for (let i = 0; i <= yTicks; i++) {
-                const y = height - padding - (i / yTicks) * (height - 2 * padding);
-                const value = (minBytes + (i / yTicks) * yRange).toFixed(2);
-                ctx.fillText(`${value} ${unit}`, paddingLeft - 10, y + 4);
-            }
+                ctx.fillStyle = '#1f2937';
+                ctx.font = `12px Arial`;
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(`${item.bytes.toFixed(2)} MB`, x, y - 15);
+            };
 
-            ctx.fillStyle = '#1f2937';
-            ctx.font = '12px Arial';
-            ctx.textAlign = 'center';
+            const drawChart = () => {
+                ctx.clearRect(0, 0, width, height);
+                drawGrid();
+                drawDataPoints();
+                if (hoveredIndex !== -1) {
+                    drawHoverLabel();
+                }
+            };
+
+            const handleMouseMove = (e) => {
+                if (animationFrame) cancelAnimationFrame(animationFrame);
+                    animationFrame = requestAnimationFrame(() => {
+                        const rect = canvas.getBoundingClientRect();
+                        const x = (e.clientX - rect.left) * (canvas.width / rect.width) / dpr;
+                        const y = (e.clientY - rect.top) * (canvas.height / rect.height) / dpr;
+
+                        // 坐标匹配算法
+                        const newHoveredIndex = trendData.findIndex((_, i) => {
+                        const px = paddingLeft + i * xStep;
+                        const py = height - padding - (trendData[i].bytes - minBytes) * yScale;
+                        return Math.hypot(x - px, y - py) < 8;
+                        });
+
+                        if (newHoveredIndex !== hoveredIndex) {
+                            hoveredIndex = newHoveredIndex;
+                            drawChart();
+                        }
+                });
+            };
+
+            canvas.addEventListener('mousemove', handleMouseMove);
+            canvas.style.cursor = 'pointer';
+
+            drawChart();
+            return () => {
+                canvas.removeEventListener('mousemove', handleMouseMove);
+                if (animationFrame) cancelAnimationFrame(animationFrame);
+            };
+
             trendData.forEach((item, i) => {
                 if (trendData.length > 10 && i % 2 !== 0) return;
                 const x = paddingLeft + i * xStep;

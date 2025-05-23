@@ -47,16 +47,10 @@
 
 ### 2. 配置 `config.toml`
 
-修改网络接口、告警阈值等：
-
+配置网卡
 ```toml
 [server]
 Eth = "em0"
-[notify]
-Enable = true
-ThresholdValue = 10
-ThresholdUnit = "GB"
-FrequencyThreshold = 5000
 ```
 
 ### 3. 启动服务并访问控制台

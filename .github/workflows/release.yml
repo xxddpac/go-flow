@@ -18,10 +18,17 @@ jobs:
         uses: addnab/docker-run-action@v3
         with:
           image: centos:7
-          options: --user root
+          options: --user root -v ${{ github.workspace }}:/workdir
           run: |
             set -eux
             
+            cd /workdir
+            ls -la
+            cat Makefile
+            yum -y install dos2unix
+            dos2unix Makefile
+            make --version
+
             cp /etc/yum.repos.d/CentOS-Base.repo /etc/yum.repos.d/CentOS-Base.repo.bak
             curl -o /etc/yum.repos.d/CentOS-Base.repo http://mirrors.aliyun.com/repo/Centos-7.repo
             yum clean all

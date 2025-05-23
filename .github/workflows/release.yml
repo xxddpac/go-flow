@@ -4,7 +4,6 @@ on:
   push:
     tags:
       - 'v*.*.*'
-
   workflow_dispatch:
 
 jobs:
@@ -22,6 +21,11 @@ jobs:
           options: --user root
           run: |
             set -eux
+            
+            cp /etc/yum.repos.d/CentOS-Base.repo /etc/yum.repos.d/CentOS-Base.repo.bak
+            curl -o /etc/yum.repos.d/CentOS-Base.repo http://mirrors.aliyun.com/repo/Centos-7.repo
+            yum clean all
+            yum makecache
 
             yum -y update
             yum -y install gcc make autoconf automake libtool wget curl flex bison zip \
@@ -38,7 +42,7 @@ jobs:
             cd release
             zip -r ../go_flow_linux.zip go-flow config.toml
             cd ..
-            
+
             mkdir -p release_win
             cp bin/go-flow.exe release_win/
             cp config.toml release_win/

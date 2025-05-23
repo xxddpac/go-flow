@@ -14,17 +14,25 @@ jobs:
       image: centos:7
 
     steps:
+      - name: Fix CentOS yum mirror (Aliyun)
+        run: |
+          sed -e 's|^mirrorlist=|#mirrorlist=|g' \
+              -e 's|^#baseurl=http://mirror.centos.org|baseurl=https://mirrors.aliyun.com|g' \
+              -i.bak /etc/yum.repos.d/CentOS-Base.repo
+          yum clean all
+          yum makecache
+
       - name: Install system dependencies
         run: |
           yum -y update
           yum -y install gcc make autoconf automake libtool wget curl flex bison zip \
             mingw64-gcc mingw64-gcc-c++ golang
 
-      - name: Add Go to PATH
+      - name: Set Go environment
         run: |
-          echo 'export PATH=$PATH:/usr/lib/golang/bin' >> /etc/profile
-          source /etc/profile
-        shell: bash
+          echo "export GOROOT=/usr/lib/golang" >> $GITHUB_ENV
+          echo "export GOPATH=/go" >> $GITHUB_ENV
+          echo "export PATH=$PATH:/usr/lib/golang/bin:/go/bin" >> $GITHUB_ENV
 
       - name: Checkout code
         uses: actions/checkout@v4

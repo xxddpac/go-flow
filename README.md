@@ -41,11 +41,11 @@
 
 ## 🚀 快速开始
 
-### 1. 下载最新release包
+### 1. 下载最新release压缩包
 
 从 [Releases 页面](https://github.com/xxddpac/go-flow/releases) 下载适合系统的可执行文件。
 
-### 2. 配置 `config.toml`
+### 2. 编辑 `config.toml`
 
 配置网卡
 ```toml
@@ -66,6 +66,8 @@ go-flow.exe -c config.toml
 
 访问 `http://<server_ip>:31415` 查看控制台页面
 
+---
+
 ## 📊 Web UI
 
 - `Sessions` 展示会话级流量，包含源/目的 IP、端口、协议、流量占用和请求次数，便于分析具体通信关系
@@ -84,6 +86,8 @@ go-flow.exe -c config.toml
 
 ![Trend](https://raw.githubusercontent.com/xxddpac/go-flow/main/image/trend.jpg)
 
+---
+
 ## 🚨 风险预警
 
 - `大流量预警` 计算滑动窗口内的流量总和，识别异常大流量
@@ -91,6 +95,8 @@ go-flow.exe -c config.toml
 
 - `高频扫描预警` 识别高频扫描或分布式探测
   ![Frequency](https://raw.githubusercontent.com/xxddpac/go-flow/main/image/frequency.jpg)
+
+---
 
 ## 💾 数据持久化与扩展
 
@@ -112,6 +118,8 @@ Topic = "go-flow"
 ```  
 
 ![Dashboard](https://raw.githubusercontent.com/xxddpac/go-flow/main/image/dashboard.jpg)
+
+---
 
 ## 🛠️ 源码编译
 

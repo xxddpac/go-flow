@@ -7,7 +7,7 @@
 </p>
 
 
-<h1 align="center">🌐GO-FLOW</h1>
+<h1 align="center">🌐 GO-FLOW</h1>
 
 <p align="center"><strong>轻量级、高性能的实时网络流量监控与异常检测工具</strong></p>
 
@@ -27,14 +27,16 @@
 ## 🧩 使用场景
 
 ### 1. 本机流量分析
+
 ```
 部署在主机或容器中，监控自身网络流量，适用于服务节点、办公终端、云主机等环境
 ```
+
 ### 2. 核心链路流量旁路分析
+
 ```
 通过交换机端口镜像（Port Mirror / SPAN）或网络 TAP，将边缘设备、网关、防火墙等关键链路流量引导至 go-flow，进行实时分析与异常检测
 ```
-
 
 ---
 
@@ -61,7 +63,12 @@ FrequencyThreshold = 5000
 ### 3. 启动服务并访问控制台
 
 ```
+# Linux
+chmod +x go-flow
 ./go-flow -c config.toml
+
+# Windows
+go-flow.exe -c config.toml
 ```
 
 访问 `http://<server_ip>:31415` 查看控制台页面
@@ -92,7 +99,6 @@ FrequencyThreshold = 5000
 - `高频扫描预警` 识别高频扫描或分布式探测
   ![Frequency](https://raw.githubusercontent.com/xxddpac/go-flow/main/image/frequency.jpg)
 
-
 ## 💾 数据持久化与扩展
 
 `go-flow` 设计初衷是**简单轻量、开箱即用**，默认采用内存结构，在滑动时间窗口内完成**实时流量分析与异常检测**，无需依赖任何外部组件。
@@ -111,7 +117,6 @@ Enable = true
 Brokers = ["localhost:9092"]
 Topic = "go-flow"
 ```  
-> 🔄 后续分析逻辑（存储、查询、告警等）可按业务需求灵活扩展
 
 ![Dashboard](https://raw.githubusercontent.com/xxddpac/go-flow/main/image/dashboard.jpg)
 
@@ -121,28 +126,12 @@ Topic = "go-flow"
 git clone https://github.com/xxddpac/go-flow.git
 cd go-flow
 
-# Build for CentOS
-make build-centos
+# Build for Linux
+make build-linux
 
 # Build for Windows
-make build-win
+make build-windows
 
 # Clean build artifacts
 make clean
 ```
-
-## 🚨 问题&解决
-### 启动报错 `error while loading shared libraries: libpcap.so.1: cannot open shared object file`
-
-原因：系统缺少 `libpcap` 运行库。
-
-解决：
-- **CentOS / RHEL / Fedora:**
-
-``` sudo yum install -y libpcap```
-
-- **Debian / Ubuntu:**
-
-``` sudo apt-get install -y libpcap0.8```
-
-- **其他 Linux 发行版**，请使用对应的包管理器安装 `libpcap`

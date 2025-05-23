@@ -1,65 +1,62 @@
-#release.yml:
-#name: Build and Release
-#
-#on:
-#  push:
-#    tags:
-#      - 'v*.*.*'
-#
-#jobs:
-#  build-and-release:
-#    runs-on: ubuntu-latest
-#
-#    steps:
-#      - name: Checkout code
-#        uses: actions/checkout@v4
-#
-#      - name: Set up Go
-#        uses: actions/setup-go@v5
-#        with:
-#          go-version: '1.21'
-#
-#      - name: Install dependencies for Linux build
-#        run: |
-#          sudo apt-get update
-#          sudo apt-get install -y gcc libpcap-dev
-#
-#      - name: Build for Linux
-#        run: |
-#          mkdir -p bin
-#          CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -a -o bin/go-flow .
-#
-#      - name: Build for Windows
-#        run: |
-#          mkdir -p bin
-#          CGO_ENABLED=1 GOOS=windows GOARCH=amd64 go build -a -o bin/go-flow.exe .
-#
-#      - name: Package Linux ZIP
-#        run: |
-#          mkdir -p release
-#          cp bin/go-flow release/
-#          cp config.toml release/
-#          cd release
-#          zip -r go_flow_linux.zip go-flow config.toml
-#          mv go_flow_linux.zip ../
-#          cd ..
-#
-#      - name: Package Windows ZIP
-#        run: |
-#          mkdir -p release
-#          cp bin/go-flow.exe release/
-#          cp config.toml release/
-#          cd release
-#          zip -r go_flow_windows.zip go-flow.exe config.toml
-#          mv go_flow_windows.zip ../
-#          cd ..
-#
-#      - name: Create GitHub Release
-#        uses: softprops/action-gh-release@v2
-#        with:
-#          files: |
-#            go_flow_linux.zip
-#            go_flow_windows.zip
-#          body: ""
-#        env:
-#          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+name: Build and Release (CentOS)
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  build:
+    name: Build in CentOS
+    runs-on: ubuntu-latest
+
+    container:
+      image: centos:7
+
+    steps:
+      - name: Install system dependencies
+        run: |
+          yum -y update
+          yum -y install gcc make autoconf automake libtool wget curl flex bison zip \
+            mingw64-gcc mingw64-gcc-c++ golang
+
+      - name: Add Go to PATH
+        run: |
+          echo 'export PATH=$PATH:/usr/lib/golang/bin' >> /etc/profile
+          source /etc/profile
+        shell: bash
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build static binaries for Linux and Windows
+        run: |
+          make clean
+          make all
+
+      - name: Package Linux release
+        run: |
+          mkdir -p release
+          cp bin/go-flow release/
+          cp config.toml release/
+          cd release
+          zip -r go_flow_linux.zip go-flow config.toml
+          mv go_flow_linux.zip ../
+
+      - name: Package Windows release
+        run: |
+          mkdir -p release
+          cp bin/go-flow.exe release/
+          cp config.toml release/
+          cd release
+          zip -r go_flow_windows.zip go-flow.exe config.toml
+          mv go_flow_windows.zip ../
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            go_flow_linux.zip
+            go_flow_windows.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -43,7 +43,7 @@
 
 ### 1. 下载最新release压缩包
 
-从 [Releases 页面](https://github.com/xxddpac/go-flow/releases) 下载适合系统的可执行文件。
+从 [Releases](https://github.com/xxddpac/go-flow/releases)下载适合系统的可执行文件。
 
 ### 2. 编辑 `config.toml`
 

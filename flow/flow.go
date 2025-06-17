@@ -504,12 +504,13 @@ func Capture(device string, pool *async.WorkerPool, w *Window) {
 					Bytes:     float64(packetLen),
 					Requests:  1,
 				}
+				copied := *stats
+				syncPool.Put(stats)
 				if conf.CoreConf.Kafka.Enable {
-					msg, _ := json.Marshal(stats)
+					msg, _ := json.Marshal(copied)
 					kafka.Push(msg)
 				}
-				w.Add(*stats)
-				syncPool.Put(stats)
+				w.Add(copied)
 				return nil
 			}, packet)
 		case <-ticker.C:

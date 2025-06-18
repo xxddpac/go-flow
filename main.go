@@ -12,6 +12,7 @@ import (
 	"go-flow/zlog"
 	"log"
 	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"os/signal"
 	"syscall"

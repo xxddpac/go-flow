@@ -199,15 +199,14 @@
             ctx.clearRect(0, 0, width, height);
             const bytes = trendData.map(item => item.bytes);
             const timestamps = trendData.map(item => item.timestamp);
+            console.log(timestamps)
             const unit = trendData[0]?.unit || 'MB';
             const minTimestamp = Math.min(...timestamps);
-
             const maxBytes = Math.max(...bytes, 1);
             const minBytes = Math.min(...bytes, 0);
             const yRange = maxBytes - minBytes;
             const yScale = (height - 2 * padding) / yRange;
             const xStep = (width - paddingLeft - padding) / (trendData.length - 1);
-
             const drawGrid = () =>{
                 ctx.fillStyle = '#f8fafc';
                 ctx.fillRect(paddingLeft, padding, width - paddingLeft - padding, height - 2 * padding);
@@ -323,10 +322,19 @@
                 ctx.fillText(`${item.bytes.toFixed(2)} MB`, x, y - 15);
             };
 
+            const timestampOpt = () => {
+                trendData.forEach((item, i) => {
+                    if (trendData.length > 10 && i % 2 !== 0) return;
+                    const x = paddingLeft + i * xStep;
+                    ctx.fillText(formatTimeAxis(item.timestamp), x, height - padding + 20);
+                });
+            };
+
             const drawChart = () => {
                 ctx.clearRect(0, 0, width, height);
                 drawGrid();
                 drawDataPoints();
+                timestampOpt();
                 if (hoveredIndex !== -1) {
                     drawHoverLabel();
                 }
@@ -357,16 +365,11 @@
             canvas.style.cursor = 'pointer';
 
             drawChart();
+
             return () => {
                 canvas.removeEventListener('mousemove', handleMouseMove);
                 if (animationFrame) cancelAnimationFrame(animationFrame);
             };
-
-            trendData.forEach((item, i) => {
-                if (trendData.length > 10 && i % 2 !== 0) return;
-                const x = paddingLeft + i * xStep;
-                ctx.fillText(formatTimeAxis(item.timestamp), x, height - padding + 20);
-            });
         }, [trendData, tab]);
 
         const renderTableHeaders = () => {
@@ -378,7 +381,7 @@
                         <th className="py-2 px-4 border">Target Port</th>
                         <th className="py-2 px-4 border">Protocol</th>
                         <th className="py-2 px-4 border">Bandwidth</th>
-                        <th className="py-2 px-4 border">Requests</th>
+                        <th className="py-2 px-4 border">Count</th>
                     </>
                 );
             } else if (tab === 'ip') {
@@ -386,7 +389,7 @@
                     <>
                         <th className="py-2 px-4 border">IP</th>
                         <th className="py-2 px-4 border">Bandwidth</th>
-                        <th className="py-2 px-4 border">Requests</th>
+                        <th className="py-2 px-4 border">Count</th>
                     </>
                 );
             } else if (tab === 'ports') {

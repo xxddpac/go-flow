@@ -30,6 +30,77 @@ const (
 	highBandwidth = "大流量预警"
 )
 
+type Traffic struct {
+	Timestamp time.Time `json:"timestamp"`
+	SrcIP     string    `json:"src_ip"`
+	DstIP     string    `json:"dest_ip"`
+	DstPort   string    `json:"dest_port"`
+	Protocol  string    `json:"protocol"`
+	Bytes     float64   `json:"bandwidth"`
+	Requests  int64     `json:"requests"`
+	Unit      string    `json:"unit"`
+}
+
+type IPTraffic struct {
+	IP       string  `json:"ip"`
+	Bytes    float64 `json:"bytes"`
+	Requests int64   `json:"requests"`
+	Unit     string  `json:"unit"`
+}
+
+type PortTraffic struct {
+	Protocol string  `json:"protocol"`
+	DstPort  string  `json:"dest_port"`
+	Bytes    float64 `json:"bytes"`
+	Unit     string  `json:"unit"`
+}
+
+type TrendItem struct {
+	Timestamp int64   `json:"timestamp"`
+	Bytes     float64 `json:"bytes"`
+	Requests  int64   `json:"requests"`
+	Unit      string  `json:"unit"`
+}
+
+type Bucket struct {
+	Timestamp int64
+	Stats     map[string]Traffic
+}
+
+type Window struct {
+	buckets       []*Bucket
+	size          time.Duration
+	bucketMu      sync.RWMutex
+	cache         []Traffic
+	ipCache       []IPTraffic
+	trendCache    []TrendItem
+	cacheMu       sync.RWMutex
+	lastCalc      time.Time
+	Rank          int
+	portCache     []PortTraffic
+	srcToDstStats map[string]map[string]bool
+	dstToSrcStats map[string]map[string]bool
+	freqStatsMu   sync.RWMutex
+}
+
+func NewWindow(size time.Duration, rank int) *Window {
+	bucketCount := int(size / time.Minute)
+	buckets := make([]*Bucket, bucketCount)
+	for i := range buckets {
+		buckets[i] = &Bucket{
+			Timestamp: 0,
+			Stats:     make(map[string]Traffic),
+		}
+	}
+	return &Window{
+		buckets:       buckets,
+		size:          size,
+		Rank:          rank,
+		srcToDstStats: make(map[string]map[string]bool),
+		dstToSrcStats: make(map[string]map[string]bool),
+	}
+}
+
 type TrafficHeap []Traffic
 
 func (h TrafficHeap) Len() int {
@@ -92,82 +163,6 @@ func (h *PortTrafficHeap) Pop() interface{} {
 	return x
 }
 
-type Traffic struct {
-	Timestamp time.Time `json:"timestamp"`
-	SrcIP     string    `json:"src_ip"`
-	DstIP     string    `json:"dest_ip"`
-	DstPort   string    `json:"dest_port"`
-	Protocol  string    `json:"protocol"`
-	Bytes     float64   `json:"bandwidth"`
-	Requests  int64     `json:"requests"`
-	Unit      string    `json:"unit"`
-}
-
-type IPTraffic struct {
-	IP       string  `json:"ip"`
-	Bytes    float64 `json:"bytes"`
-	Requests int64   `json:"requests"`
-	Unit     string  `json:"unit"`
-}
-
-type PortTraffic struct {
-	Protocol string  `json:"protocol"`
-	DstPort  string  `json:"dest_port"`
-	Bytes    float64 `json:"bytes"`
-	Unit     string  `json:"unit"`
-}
-
-type TrendItem struct {
-	Timestamp int64   `json:"timestamp"`
-	Bytes     float64 `json:"bytes"`
-	Requests  int64   `json:"requests"`
-	Unit      string  `json:"unit"`
-}
-
-type Bucket struct {
-	Timestamp int64
-	Stats     map[string]Traffic
-}
-
-type Window struct {
-	buckets       []*Bucket
-	size          time.Duration
-	bucketMu      sync.RWMutex
-	ipStats       map[string]Traffic
-	statsMu       sync.RWMutex
-	cache         []Traffic
-	ipCache       []IPTraffic
-	trendCache    []TrendItem
-	cacheMu       sync.RWMutex
-	lastCalc      time.Time
-	Rank          int
-	portStats     map[string]PortTraffic
-	portCache     []PortTraffic
-	srcToDstStats map[string]map[string]bool
-	dstToSrcStats map[string]map[string]bool
-	freqStatsMu   sync.RWMutex
-}
-
-func NewWindow(size time.Duration, rank int) *Window {
-	bucketCount := int(size / time.Minute)
-	buckets := make([]*Bucket, bucketCount)
-	for i := range buckets {
-		buckets[i] = &Bucket{
-			Timestamp: 0,
-			Stats:     make(map[string]Traffic),
-		}
-	}
-	return &Window{
-		buckets:       buckets,
-		size:          size,
-		portStats:     make(map[string]PortTraffic),
-		ipStats:       make(map[string]Traffic),
-		Rank:          rank,
-		srcToDstStats: make(map[string]map[string]bool),
-		dstToSrcStats: make(map[string]map[string]bool),
-	}
-}
-
 func (w *Window) Add(traffic Traffic) {
 	key := getKey(traffic.SrcIP, traffic.DstIP, traffic.Protocol, traffic.DstPort)
 	w.bucketMu.Lock()
@@ -176,21 +171,7 @@ func (w *Window) Add(traffic Traffic) {
 	bucketTs := traffic.Timestamp.Truncate(time.Minute).Unix()
 	if bucket.Timestamp != bucketTs {
 		bucket.Timestamp = bucketTs
-		w.statsMu.Lock()
-		for k := range bucket.Stats {
-			if stat, ok := w.ipStats[k]; ok {
-				stat.Bytes -= bucket.Stats[k].Bytes
-				stat.Requests -= bucket.Stats[k].Requests
-				if stat.Bytes <= 1e-6 {
-					delete(w.ipStats, k)
-				} else {
-					w.ipStats[k] = stat
-				}
-			}
-		}
 		bucket.Stats = make(map[string]Traffic)
-		w.statsMu.Unlock()
-
 		w.freqStatsMu.Lock()
 		for srcIP := range w.srcToDstStats {
 			w.srcToDstStats[srcIP] = make(map[string]bool)
@@ -210,23 +191,6 @@ func (w *Window) Add(traffic Traffic) {
 	bucket.Stats[key] = s
 	w.bucketMu.Unlock()
 
-	w.statsMu.Lock()
-	agg := w.ipStats[key]
-	agg.SrcIP = traffic.SrcIP
-	agg.DstIP = traffic.DstIP
-	agg.DstPort = traffic.DstPort
-	agg.Protocol = traffic.Protocol
-	agg.Bytes += traffic.Bytes
-	agg.Requests += traffic.Requests
-	w.ipStats[key] = agg
-
-	portStat := w.portStats[traffic.DstPort]
-	portStat.DstPort = traffic.DstPort
-	portStat.Bytes += traffic.Bytes
-	portStat.Protocol = traffic.Protocol
-	w.portStats[traffic.DstPort] = portStat
-	w.statsMu.Unlock()
-
 	w.freqStatsMu.Lock()
 	if _, exists := w.srcToDstStats[traffic.SrcIP]; !exists {
 		w.srcToDstStats[traffic.SrcIP] = make(map[string]bool)
@@ -239,21 +203,134 @@ func (w *Window) Add(traffic Traffic) {
 	w.freqStatsMu.Unlock()
 }
 
-func (w *Window) PortSummary() []PortTraffic {
-	w.statsMu.RLock()
-	portStats := make(map[string]PortTraffic, len(w.portStats))
-	totalBytes := 0.0
-	for port, s := range w.portStats {
-		if s.Bytes > 0 {
-			portStats[port] = s
-			totalBytes += s.Bytes
+func (w *Window) Summary() []Traffic {
+	w.bucketMu.RLock()
+	defer w.bucketMu.RUnlock()
+
+	trafficStats := make(map[string]Traffic)
+	for _, bucket := range w.buckets {
+		if bucket.Timestamp == 0 {
+			continue
+		}
+		for key, stat := range bucket.Stats {
+			agg := trafficStats[key]
+			agg.SrcIP = stat.SrcIP
+			agg.DstIP = stat.DstIP
+			agg.DstPort = stat.DstPort
+			agg.Protocol = stat.Protocol
+			agg.Bytes += stat.Bytes
+			agg.Requests += stat.Requests
+			trafficStats[key] = agg
 		}
 	}
-	w.statsMu.RUnlock()
+
+	h := &TrafficHeap{}
+	heap.Init(h)
+	for _, s := range trafficStats {
+		if s.Bytes <= 0 {
+			continue
+		}
+		mb := s.Bytes / 1e6
+		if mb >= 1000 {
+			s.Bytes = mb / 1000
+			s.Unit = "GB"
+		} else {
+			s.Bytes = mb
+			s.Unit = "MB"
+		}
+		if h.Len() < w.Rank {
+			heap.Push(h, s)
+		} else if s.Bytes*getUnitFactor(s.Unit) > (*h)[0].Bytes*getUnitFactor((*h)[0].Unit) {
+			heap.Pop(h)
+			heap.Push(h, s)
+		}
+	}
+
+	result := make([]Traffic, h.Len())
+	for i := h.Len() - 1; i >= 0; i-- {
+		result[i] = heap.Pop(h).(Traffic)
+	}
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].Bytes*getUnitFactor(result[i].Unit) > result[j].Bytes*getUnitFactor(result[j].Unit)
+	})
+	return result
+}
+
+func (w *Window) IPSummary() []IPTraffic {
+	w.bucketMu.RLock()
+	defer w.bucketMu.RUnlock()
+
+	ipStatsMap := make(map[string]IPTraffic)
+	for _, bucket := range w.buckets {
+		if bucket.Timestamp == 0 {
+			continue
+		}
+		for _, stat := range bucket.Stats {
+			ipStat := ipStatsMap[stat.SrcIP]
+			ipStat.IP = stat.SrcIP
+			ipStat.Bytes += stat.Bytes
+			ipStat.Requests += stat.Requests
+			ipStatsMap[stat.SrcIP] = ipStat
+		}
+	}
+
+	h := &IPTrafficHeap{}
+	heap.Init(h)
+	for _, s := range ipStatsMap {
+		if s.Bytes <= 0 {
+			continue
+		}
+		mb := s.Bytes / 1e6
+		if mb >= 1000 {
+			s.Bytes = mb / 1000
+			s.Unit = "GB"
+		} else {
+			s.Bytes = mb
+			s.Unit = "MB"
+		}
+		if h.Len() < w.Rank {
+			heap.Push(h, s)
+		} else if s.Bytes*getUnitFactor(s.Unit) > (*h)[0].Bytes*getUnitFactor((*h)[0].Unit) {
+			heap.Pop(h)
+			heap.Push(h, s)
+		}
+	}
+
+	result := make([]IPTraffic, h.Len())
+	for i := h.Len() - 1; i >= 0; i-- {
+		result[i] = heap.Pop(h).(IPTraffic)
+	}
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].Bytes*getUnitFactor(result[i].Unit) > result[j].Bytes*getUnitFactor(result[j].Unit)
+	})
+	return result
+}
+
+func (w *Window) PortSummary() []PortTraffic {
+	w.bucketMu.RLock()
+	defer w.bucketMu.RUnlock()
+
+	portStats := make(map[string]PortTraffic)
+	for _, bucket := range w.buckets {
+		if bucket.Timestamp == 0 {
+			continue
+		}
+		for _, stat := range bucket.Stats {
+			key := stat.DstPort
+			portStat := portStats[key]
+			portStat.DstPort = stat.DstPort
+			portStat.Protocol = stat.Protocol
+			portStat.Bytes += stat.Bytes
+			portStats[key] = portStat
+		}
+	}
 
 	h := &PortTrafficHeap{}
 	heap.Init(h)
 	for _, s := range portStats {
+		if s.Bytes <= 0 {
+			continue
+		}
 		mb := s.Bytes / 1e6
 		unit := "MB"
 		if mb >= 1000 {
@@ -274,85 +351,6 @@ func (w *Window) PortSummary() []PortTraffic {
 	result := make([]PortTraffic, h.Len())
 	for i := h.Len() - 1; i >= 0; i-- {
 		result[i] = heap.Pop(h).(PortTraffic)
-	}
-	sort.Slice(result, func(i, j int) bool {
-		return result[i].Bytes*getUnitFactor(result[i].Unit) > result[j].Bytes*getUnitFactor(result[j].Unit)
-	})
-	return result
-}
-
-func (w *Window) Summary() []Traffic {
-	w.statsMu.RLock()
-	ipStats := make(map[string]Traffic, len(w.ipStats))
-	for k, s := range w.ipStats {
-		if s.Bytes > 0 {
-			ipStats[k] = s
-		}
-	}
-	w.statsMu.RUnlock()
-	h := &TrafficHeap{}
-	heap.Init(h)
-	for _, s := range ipStats {
-		mb := s.Bytes / 1e6
-		if mb >= 1000 {
-			s.Bytes = mb / 1000
-			s.Unit = "GB"
-		} else {
-			s.Bytes = mb
-			s.Unit = "MB"
-		}
-		if h.Len() < w.Rank {
-			heap.Push(h, s)
-		} else if s.Bytes*getUnitFactor(s.Unit) > (*h)[0].Bytes*getUnitFactor((*h)[0].Unit) {
-			heap.Pop(h)
-			heap.Push(h, s)
-		}
-	}
-	result := make([]Traffic, h.Len())
-	for i := h.Len() - 1; i >= 0; i-- {
-		result[i] = heap.Pop(h).(Traffic)
-	}
-	sort.Slice(result, func(i, j int) bool {
-		return result[i].Bytes*getUnitFactor(result[i].Unit) > result[j].Bytes*getUnitFactor(result[j].Unit)
-	})
-	return result
-}
-
-func (w *Window) IPSummary() []IPTraffic {
-	w.statsMu.RLock()
-	ipStatsMap := make(map[string]IPTraffic)
-	for _, s := range w.ipStats {
-		if s.Bytes > 0 {
-			ipStat := ipStatsMap[s.SrcIP]
-			ipStat.IP = s.SrcIP
-			ipStat.Bytes += s.Bytes
-			ipStat.Requests += s.Requests
-			ipStatsMap[s.SrcIP] = ipStat
-		}
-	}
-	w.statsMu.RUnlock()
-
-	h := &IPTrafficHeap{}
-	heap.Init(h)
-	for _, s := range ipStatsMap {
-		mb := s.Bytes / 1e6
-		if mb >= 1000 {
-			s.Bytes = mb / 1000
-			s.Unit = "GB"
-		} else {
-			s.Bytes = mb
-			s.Unit = "MB"
-		}
-		if h.Len() < w.Rank {
-			heap.Push(h, s)
-		} else if s.Bytes*getUnitFactor(s.Unit) > (*h)[0].Bytes*getUnitFactor((*h)[0].Unit) {
-			heap.Pop(h)
-			heap.Push(h, s)
-		}
-	}
-	result := make([]IPTraffic, h.Len())
-	for i := h.Len() - 1; i >= 0; i-- {
-		result[i] = heap.Pop(h).(IPTraffic)
 	}
 	sort.Slice(result, func(i, j int) bool {
 		return result[i].Bytes*getUnitFactor(result[i].Unit) > result[j].Bytes*getUnitFactor(result[j].Unit)
@@ -577,125 +575,6 @@ func Capture(device string, pool *async.WorkerPool, w *Window) {
 	}
 }
 
-func getKey(ip, dstIP, protocol string, dstPort string) string {
-	return fmt.Sprintf("%s|%s|%s|%d", ip, dstIP, protocol, dstPort)
-}
-
-func getUnitFactor(unit string) float64 {
-	switch unit {
-	case "GB":
-		return 1e9
-	case "MB":
-		return 1e6
-	default:
-		return 1
-	}
-}
-
-func getThresholdBytes() float64 {
-	var (
-		unit  = conf.CoreConf.Notify.ThresholdUnit
-		value = conf.CoreConf.Notify.ThresholdValue
-	)
-	switch unit {
-	case "GB":
-		return value * 1e9
-	case "MB":
-		return value * 1e6
-	default:
-		return value
-	}
-}
-
-//go:embed index.html
-//go:embed static/*
-var content embed.FS
-
-type TopItem struct {
-	SrcIP     string  `json:"src_ip"`
-	DstIP     string  `json:"dest_ip"`
-	DstPort   string  `json:"dest_port"`
-	Protocol  string  `json:"protocol"`
-	Bandwidth float64 `json:"bandwidth"`
-	Unit      string  `json:"unit"`
-	Requests  int64   `json:"requests"`
-}
-
-type TopResponse struct {
-	Data       []TopItem `json:"data"`
-	Timestamp  int64     `json:"timestamp"`
-	WindowSize int       `json:"window_size"`
-	Rank       int       `json:"rank"`
-}
-
-type PortResponse struct {
-	DstPort  string  `json:"dest_port"`
-	Bytes    float64 `json:"bytes"`
-	Protocol string  `json:"protocol"`
-	Unit     string  `json:"unit"`
-}
-
-type TrendResponse struct {
-	Data       []TrendItem `json:"data"`
-	WindowSize int         `json:"window_size"`
-}
-
-var (
-	systemMonitorManager *SystemMonitorManager
-	localIp              = utils.GetLocalIp()
-)
-
-type SystemMonitor struct {
-	NetworkInterface string `json:"network_interface"`
-	LocalIp          string `json:"local_ip"`
-	Cpu              string `json:"cpu"`
-	Mem              string `json:"mem"`
-	Workers          int    `json:"workers"`
-}
-
-type SystemMonitorManager struct {
-	Mu   sync.RWMutex
-	Data map[string]SystemMonitor
-}
-
-func (s *SystemMonitorManager) Get(key string) SystemMonitor {
-	s.Mu.RLock()
-	defer s.Mu.RUnlock()
-	return s.Data[key]
-}
-
-func (s *SystemMonitorManager) Set(key string, value SystemMonitor) {
-	s.Mu.RLock()
-	defer s.Mu.RUnlock()
-	s.Data[key] = value
-}
-
-func init() {
-	systemMonitorManager = &SystemMonitorManager{
-		Data: make(map[string]SystemMonitor),
-	}
-	go systemMonitorManager.run()
-}
-
-func (s *SystemMonitorManager) run() {
-	ticker := time.NewTicker(2 * time.Second)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ticker.C:
-			s.Set(localIp, SystemMonitor{
-				NetworkInterface: conf.CoreConf.Server.Eth,
-				LocalIp:          localIp,
-				Cpu:              utils.GetCpuUsage(),
-				Mem:              utils.GetMemUsage(),
-				Workers:          runtime.NumGoroutine(),
-			})
-		case <-utils.Ctx.Done():
-			return
-		}
-	}
-}
-
 func (w *Window) ServeHTTP(wr http.ResponseWriter, r *http.Request) {
 	if r.URL.Path == "/top" {
 		w.cacheMu.RLock()
@@ -796,4 +675,123 @@ func (w *Window) ServeHTTP(wr http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.FileServer(http.FS(content)).ServeHTTP(wr, r)
+}
+
+func getKey(ip, dstIP, protocol string, dstPort string) string {
+	return fmt.Sprintf("%s|%s|%s|%s", ip, dstIP, protocol, dstPort)
+}
+
+func getUnitFactor(unit string) float64 {
+	switch unit {
+	case "GB":
+		return 1e9
+	case "MB":
+		return 1e6
+	default:
+		return 1
+	}
+}
+
+func getThresholdBytes() float64 {
+	var (
+		unit  = conf.CoreConf.Notify.ThresholdUnit
+		value = conf.CoreConf.Notify.ThresholdValue
+	)
+	switch unit {
+	case "GB":
+		return value * 1e9
+	case "MB":
+		return value * 1e6
+	default:
+		return value
+	}
+}
+
+//go:embed index.html
+//go:embed static/*
+var content embed.FS
+
+type TopItem struct {
+	SrcIP     string  `json:"src_ip"`
+	DstIP     string  `json:"dest_ip"`
+	DstPort   string  `json:"dest_port"`
+	Protocol  string  `json:"protocol"`
+	Bandwidth float64 `json:"bandwidth"`
+	Unit      string  `json:"unit"`
+	Requests  int64   `json:"requests"`
+}
+
+type TopResponse struct {
+	Data       []TopItem `json:"data"`
+	Timestamp  int64     `json:"timestamp"`
+	WindowSize int       `json:"window_size"`
+	Rank       int       `json:"rank"`
+}
+
+type PortResponse struct {
+	DstPort  string  `json:"dest_port"`
+	Bytes    float64 `json:"bytes"`
+	Protocol string  `json:"protocol"`
+	Unit     string  `json:"unit"`
+}
+
+type TrendResponse struct {
+	Data       []TrendItem `json:"data"`
+	WindowSize int         `json:"window_size"`
+}
+
+var (
+	systemMonitorManager *SystemMonitorManager
+	localIp              = utils.GetLocalIp()
+)
+
+type SystemMonitor struct {
+	NetworkInterface string `json:"network_interface"`
+	LocalIp          string `json:"local_ip"`
+	Cpu              string `json:"cpu"`
+	Mem              string `json:"mem"`
+	Workers          int    `json:"workers"`
+}
+
+type SystemMonitorManager struct {
+	Mu   sync.RWMutex
+	Data map[string]SystemMonitor
+}
+
+func (s *SystemMonitorManager) Get(key string) SystemMonitor {
+	s.Mu.RLock()
+	defer s.Mu.RUnlock()
+	return s.Data[key]
+}
+
+func (s *SystemMonitorManager) Set(key string, value SystemMonitor) {
+	s.Mu.Lock()
+	defer s.Mu.Unlock()
+	s.Data[key] = value
+}
+
+func init() {
+	systemMonitorManager = &SystemMonitorManager{
+		Data: make(map[string]SystemMonitor),
+	}
+	go systemMonitorManager.run()
+}
+
+func (s *SystemMonitorManager) run() {
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			s.Set(localIp, SystemMonitor{
+				NetworkInterface: conf.CoreConf.Server.Eth,
+				LocalIp:          localIp,
+				Cpu:              utils.GetCpuUsage(),
+				Mem:              utils.GetMemUsage(),
+				Workers:          runtime.NumGoroutine(),
+			})
+		case <-utils.Ctx.Done():
+			return
+		}
+	}
 }

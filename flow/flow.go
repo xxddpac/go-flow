@@ -14,6 +14,7 @@ import (
 	"go-flow/kafka"
 	"go-flow/notify"
 	"go-flow/utils"
+	"math"
 	"net/http"
 	"os"
 	"runtime"
@@ -74,6 +75,7 @@ type Window struct {
 	cache         []Traffic
 	ipCache       []IPTraffic
 	trendCache    []TrendItem
+	protoCache    ProtocolCache
 	cacheMu       sync.RWMutex
 	lastCalc      time.Time
 	Rank          int
@@ -156,6 +158,24 @@ func (h *PortTrafficHeap) Push(x interface{}) {
 	*h = append(*h, x.(PortTraffic))
 }
 func (h *PortTrafficHeap) Pop() interface{} {
+	old := *h
+	n := len(old)
+	x := old[n-1]
+	*h = old[0 : n-1]
+	return x
+}
+
+type StatHeap []ProtocolStat
+
+func (h StatHeap) Len() int { return len(h) }
+func (h StatHeap) Less(i, j int) bool {
+	return h[i].Percent < h[j].Percent
+}
+func (h StatHeap) Swap(i, j int) { h[i], h[j] = h[j], h[i] }
+func (h *StatHeap) Push(x interface{}) {
+	*h = append(*h, x.(ProtocolStat))
+}
+func (h *StatHeap) Pop() interface{} {
 	old := *h
 	n := len(old)
 	x := old[n-1]
@@ -414,6 +434,77 @@ func (w *Window) TrendSummary() []TrendItem {
 	return result
 }
 
+func (w *Window) ProtocolSummary() ProtocolCache {
+	w.bucketMu.RLock()
+	defer w.bucketMu.RUnlock()
+
+	protoBytes := make(map[string]float64)
+	totalBytes := 0.0
+	for _, bucket := range w.buckets {
+		if bucket.Timestamp == 0 {
+			continue
+		}
+		for _, stat := range bucket.Stats {
+			proto := extractProtocol(stat.DstPort)
+			protoBytes[proto] += stat.Bytes
+			totalBytes += stat.Bytes
+		}
+	}
+
+	protoHeap := &StatHeap{}
+	heap.Init(protoHeap)
+	for proto, bytes := range protoBytes {
+		if bytes <= 0 {
+			continue
+		}
+		percent := 0.0
+		if totalBytes > 0 {
+			percent = (bytes / totalBytes) * 100
+			percent = math.Round(percent*100) / 100
+		}
+		stat := ProtocolStat{Protocol: proto, Percent: percent}
+		if protoHeap.Len() < 5 {
+			heap.Push(protoHeap, stat)
+		} else if percent > (*protoHeap)[0].Percent {
+			heap.Pop(protoHeap)
+			heap.Push(protoHeap, stat)
+		}
+	}
+
+	protocolStats := make([]ProtocolStat, 0, protoHeap.Len())
+	for protoHeap.Len() > 0 {
+		stat := heap.Pop(protoHeap).(ProtocolStat)
+		protocolStats = append(protocolStats, stat)
+	}
+	sort.Slice(protocolStats, func(i, j int) bool {
+		return protocolStats[i].Percent > protocolStats[j].Percent
+	})
+
+	portTraffic := w.PortSummary()
+	maxPorts := 5
+	if len(portTraffic) > maxPorts {
+		portTraffic = portTraffic[:maxPorts]
+	}
+	portStats := make([]ProtocolStat, 0, maxPorts)
+	for _, pt := range portTraffic {
+		bytes := pt.Bytes * getUnitFactor(pt.Unit)
+		percent := 0.0
+		if totalBytes > 0 {
+			percent = (bytes / totalBytes) * 100
+			percent = math.Round(percent*100) / 100
+		}
+		portStats = append(portStats, ProtocolStat{
+			Protocol: extractPort(pt.DstPort),
+			Percent:  percent,
+		})
+	}
+
+	return ProtocolCache{
+		ProtocolStats: protocolStats,
+		PortStats:     portStats,
+	}
+}
+
 func (w *Window) StartCacheUpdate(wg *sync.WaitGroup) {
 	defer wg.Done()
 	ticker := time.NewTicker(2 * time.Second)
@@ -424,11 +515,13 @@ func (w *Window) StartCacheUpdate(wg *sync.WaitGroup) {
 			ipResult := w.IPSummary()
 			portResult := w.PortSummary()
 			trendResult := w.TrendSummary()
+			protoResult := w.ProtocolSummary()
 			w.cacheMu.Lock()
 			w.cache = result
 			w.ipCache = ipResult
 			w.portCache = portResult
 			w.trendCache = trendResult
+			w.protoCache = protoResult
 			w.lastCalc = time.Now()
 			w.cacheMu.Unlock()
 		case <-utils.Ctx.Done():
@@ -664,6 +757,22 @@ func (w *Window) ServeHTTP(wr http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	if r.URL.Path == "/stats/protocols" {
+		w.cacheMu.RLock()
+		protoCache := w.protoCache
+		w.cacheMu.RUnlock()
+		response := ProtocolResponse{
+			ProtocolStats: protoCache.ProtocolStats,
+			PortStats:     protoCache.PortStats,
+			Timestamp:     w.lastCalc.Unix(),
+			WindowSize:    int(w.size.Seconds()),
+		}
+		wr.Header().Set("Content-Type", "application/json")
+		if err := ji.NewEncoder(wr).Encode(response); err != nil {
+			http.Error(wr, "Failed to encode JSON", http.StatusInternalServerError)
+		}
+		return
+	}
 	if r.URL.Path == "/" {
 		file, err := content.ReadFile("index.html")
 		if err != nil {
@@ -707,6 +816,22 @@ func getThresholdBytes() float64 {
 	}
 }
 
+func extractPort(dstPort string) string {
+	if strings.Contains(dstPort, "(") {
+		return dstPort[:strings.Index(dstPort, "(")]
+	}
+	return dstPort
+}
+
+func extractProtocol(dstPort string) string {
+	if strings.Contains(dstPort, "(") && strings.HasSuffix(dstPort, ")") {
+		start := strings.Index(dstPort, "(") + 1
+		end := len(dstPort) - 1
+		return strings.ToLower(dstPort[start:end])
+	}
+	return "other"
+}
+
 //go:embed index.html
 //go:embed static/*
 var content embed.FS
@@ -738,6 +863,23 @@ type PortResponse struct {
 type TrendResponse struct {
 	Data       []TrendItem `json:"data"`
 	WindowSize int         `json:"window_size"`
+}
+
+type ProtocolStat struct {
+	Protocol string  `json:"protocol"`
+	Percent  float64 `json:"percent"`
+}
+
+type ProtocolResponse struct {
+	ProtocolStats []ProtocolStat `json:"protocol_stats"`
+	PortStats     []ProtocolStat `json:"port_stats"`
+	Timestamp     int64          `json:"timestamp"`
+	WindowSize    int            `json:"window_size"`
+}
+
+type ProtocolCache struct {
+	ProtocolStats []ProtocolStat
+	PortStats     []ProtocolStat
 }
 
 var (

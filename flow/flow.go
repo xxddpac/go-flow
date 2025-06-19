@@ -439,14 +439,18 @@ func (w *Window) ProtocolSummary() ProtocolCache {
 	defer w.bucketMu.RUnlock()
 
 	protoBytes := make(map[string]float64)
+	portBytes := make(map[string]float64)
 	totalBytes := 0.0
+	statCount := 0
 	for _, bucket := range w.buckets {
 		if bucket.Timestamp == 0 {
 			continue
 		}
+		statCount += len(bucket.Stats)
 		for _, stat := range bucket.Stats {
 			proto := extractProtocol(stat.DstPort)
 			protoBytes[proto] += stat.Bytes
+			portBytes[stat.DstPort] += stat.Bytes
 			totalBytes += stat.Bytes
 		}
 	}
@@ -480,13 +484,30 @@ func (w *Window) ProtocolSummary() ProtocolCache {
 		return protocolStats[i].Percent > protocolStats[j].Percent
 	})
 
-	portTraffic := w.PortSummary()
-	maxPorts := 5
-	if len(portTraffic) > maxPorts {
-		portTraffic = portTraffic[:maxPorts]
+	portHeap := &PortTrafficHeap{}
+	heap.Init(portHeap)
+	for port, bytes := range portBytes {
+		if bytes <= 0 {
+			continue
+		}
+		mb := bytes / 1e6
+		unit := "MB"
+		if mb >= 1000 {
+			mb = mb / 1000
+			unit = "GB"
+		}
+		pt := PortTraffic{DstPort: port, Bytes: mb, Unit: unit}
+		if portHeap.Len() < 5 {
+			heap.Push(portHeap, pt)
+		} else if bytes > (*portHeap)[0].Bytes*getUnitFactor((*portHeap)[0].Unit) {
+			heap.Pop(portHeap)
+			heap.Push(portHeap, pt)
+		}
 	}
-	portStats := make([]ProtocolStat, 0, maxPorts)
-	for _, pt := range portTraffic {
+
+	portStats := make([]ProtocolStat, 0, 5)
+	for portHeap.Len() > 0 {
+		pt := heap.Pop(portHeap).(PortTraffic)
 		bytes := pt.Bytes * getUnitFactor(pt.Unit)
 		percent := 0.0
 		if totalBytes > 0 {
@@ -498,7 +519,6 @@ func (w *Window) ProtocolSummary() ProtocolCache {
 			Percent:  percent,
 		})
 	}
-
 	return ProtocolCache{
 		ProtocolStats: protocolStats,
 		PortStats:     portStats,

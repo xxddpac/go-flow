@@ -8,6 +8,7 @@
     <script src="static/react-dom.production.min.js"></script>
     <script src="static/babel.min.js"></script>
     <script src="static/tailwind.min.js"></script>
+    <script src="static/echarts.min.js"></script>
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -45,6 +46,12 @@
             border-radius: 4px;
             background-color: #ffffff;
         }
+        .pieChart {
+            margin-top: 16px;
+            width: 100%;
+            display: flex;
+            justify-content: space-between;
+        }
     </style>
 </head>
 <body>
@@ -55,6 +62,8 @@
     const FlowTable = () => {
         const [data, setData] = useState([]);
         const [trendData, setTrendData] = useState([]);
+        const [protocolStatsPie, setProtocolStatsPie] = useState([]);
+        const [portStatsPie, setPortStatsPie] = useState([]);
         const [timestamp, setTimestamp] = useState(0);
         const [windowSize, setWindowSize] = useState(0);
         const [rank, setRank] = useState(0);
@@ -62,6 +71,10 @@
         const [loading, setLoading] = useState(false);
         const [tab, setTab] = useState('traffic');
         const canvasRef = useRef(null);
+        const protocolPieRef = useRef(null);
+        const portsPieRef = useRef(null);
+        const pieChartRef = useRef(null);
+        const portsChartRef = useRef(null);
         const [eth, setEth] = useState("");
         const [cpu, setCpu] = useState("");
         const [mem, setMem] = useState("");
@@ -120,6 +133,8 @@
                 setGoroutines(sysJson.workers);
 
                 let dataArray = [];
+                let protocolStats = [];
+                let portStats = [];
                 if (tab === 'traffic') {
                     dataArray = topJson.data || [];
                 } else if (tab === 'trend') {
@@ -127,9 +142,18 @@
                     if (!response.ok) {
                         throw new Error(`HTTP error from /trend: ${response.status}`);
                     }
+                    const responsePie = await fetch('/stats/protocols', {cache: 'no-cache'});
+                    if (!response.ok) {
+                        throw new Error(`HTTP error from /stats/protocols: ${response.status}`);
+                    }
                     const json = await response.json();
+                    const jsonPie = await responsePie.json();
                     dataArray = json.data || [];
+                    protocolStats = jsonPie.protocol_stats || [];
+                    portStats = jsonPie.port_stats || [];
                     setTrendData(dataArray);
+                    setProtocolStatsPie(protocolStats);
+                    setPortStatsPie(portStats);
                 } else {
                     const endpoint = tab === 'ip' ? '/ip_top' : '/stats/ports';
                     const response = await fetch(endpoint, {cache: 'no-cache'});
@@ -199,7 +223,6 @@
             ctx.clearRect(0, 0, width, height);
             const bytes = trendData.map(item => item.bytes);
             const timestamps = trendData.map(item => item.timestamp);
-            console.log(timestamps)
             const unit = trendData[0]?.unit || 'MB';
             const minTimestamp = Math.min(...timestamps);
             const maxBytes = Math.max(...bytes, 1);
@@ -366,9 +389,138 @@
 
             drawChart();
 
+            if (protocolPieRef.current && !pieChartRef.current) {
+                let protocolStats = []
+                for(let i = 0;i < protocolStatsPie.length; i++){
+                    let protocol = protocolStatsPie[i].protocol
+                    let percent = protocolStatsPie[i].percent
+                    protocolStats.push({value:percent,name:protocol})
+                }
+                // 创建饼图实例
+                pieChartRef.current = echarts.init(protocolPieRef.current);
+                
+                const pieOption = {
+                    title: {
+                        text: 'Top 5 Protocols by Traffic',
+                        top: 10,
+                        left: 12,
+                        textStyle: {
+                            color: '#000',
+                            fontWeight: 'bold',
+                        }
+                    },
+                    tooltip: {
+                        trigger: 'item',
+                        formatter: '{a} <br/>{b} : {c}%'
+                    },
+                    toolbox: {
+                        show: true,
+                        feature: {
+                        mark: { show: true },
+                        dataView: { show: true, readOnly: false },
+                        restore: { show: true },
+                        saveAsImage: { show: true }
+                        }
+                    },
+                    series: [
+                        {
+                            name: '占比',
+                            type: 'pie',
+                            radius: [20, 140],
+                            center: ['50%', '50%'],
+                            roseType: 'area',
+                            itemStyle: {
+                                borderRadius: 5
+                            },
+                            emphasis: {
+                            label: {
+                                show: true
+                            }
+                            },
+                            label: {
+                                normal: {
+                                    formatter: '{b}: {c}({d}%)'
+                                }
+                            },
+                            data: protocolStats
+                        }
+                    ]
+                };
+                
+                pieChartRef.current.setOption(pieOption);
+            }
+
+            
+            if (portsPieRef.current && !portsChartRef.current) {
+                let portsStats = []
+                for(let i = 0;i < portStatsPie.length; i++){
+                    let protocol = portStatsPie[i].protocol
+                    let percent = portStatsPie[i].percent
+                    portsStats.push({value:percent,name:protocol})
+                }
+                // 创建饼图实例
+                portsChartRef.current = echarts.init(portsPieRef.current);
+                
+                const pieOption = {
+                    title: {
+                        text: 'Top 5 Ports by Traffic',
+                        top: 10,
+                        left: 12,
+                        textStyle: {
+                            color: '#000',
+                            fontWeight: 'bold',
+                        }
+                    },
+                    tooltip: {
+                        trigger: 'item',
+                        formatter: '{a} <br/>{b} : {c}%'
+                    },
+                    toolbox: {
+                        show: true,
+                        feature: {
+                        mark: { show: true },
+                        dataView: { show: true, readOnly: false },
+                        restore: { show: true },
+                        saveAsImage: { show: true }
+                        }
+                    },
+                    series: [
+                        {
+                            name: '占比',
+                            type: 'pie',
+                            radius: [20, 140],
+                            center: ['50%', '50%'],
+                            roseType: 'area',
+                            itemStyle: {
+                                borderRadius: 5
+                            },
+                            emphasis: {
+                            label: {
+                                show: true
+                            }
+                            },
+                            label: {
+                                normal: {
+                                    formatter: '{b}: {c}({d}%)'
+                                }
+                            },
+                            data: portsStats
+                        }
+                    ]
+                };
+                
+                portsChartRef.current.setOption(pieOption);
+            }
+
             return () => {
                 canvas.removeEventListener('mousemove', handleMouseMove);
                 if (animationFrame) cancelAnimationFrame(animationFrame);
+                // 销毁饼图实例
+                pieChartRef.current?.dispose();
+                pieChartRef.current = null;
+                // 销毁饼图实例
+                portsChartRef.current?.dispose();
+                portsChartRef.current = null;
             };
         }, [trendData, tab]);
 
@@ -612,7 +764,13 @@
                     {tab === 'trend' && trendData.length === 0 && !error && !loading &&
                         <p className="text-center">No trend data available</p>}
                     {tab === 'trend' && trendData.length > 0 && (
-                        <canvas ref={canvasRef}></canvas>
+                        <div>
+                            <canvas ref={canvasRef}></canvas>
+                            <div class="pieChart">
+                                <div ref={protocolPieRef} style={{ height: '400px', width: '49%' , border: '1px solid #E5E7EB'}}></div>
+                                <div ref={portsPieRef} style={{ height: '400px', width: '49%' , border: '1px solid #E5E7EB'}}></div>
+                            </div>
+                        </div>
                     )}
                 </div>
             </div>

@@ -70,20 +70,6 @@ go-flow.exe -c config.toml
 
 ## 📊 Web UI
 
-- `Sessions` 展示会话级流量，包含源/目的 IP、端口、协议、流量占用和请求次数，便于分析具体通信关系
-
-![Flows](https://raw.githubusercontent.com/xxddpac/go-flow/main/image/flows.jpg)
-
-- `IP Stats` 展示单个 IP 的流量使用和请求次数，帮助识别高流量主机和活跃节点
-
-![IPs](https://raw.githubusercontent.com/xxddpac/go-flow/main/image/ips.jpg)
-
-- `Port Stats` 展示各目的端口的流量占用和协议分布，便于识别热门服务和异常端口活动
-
-![Ports](https://raw.githubusercontent.com/xxddpac/go-flow/main/image/ports.jpg)
-
-- `Trend` 展示滑动时间窗口内整体网络流量变化趋势，便于观察流量高峰、波动和异常增长情况
-
 ![Trend](https://raw.githubusercontent.com/xxddpac/go-flow/main/image/trend.jpg)
 
 ---

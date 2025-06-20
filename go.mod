@@ -8,6 +8,7 @@ require (
 	github.com/google/gopacket v1.1.19
 	github.com/json-iterator/go v1.1.12
 	github.com/shirou/gopsutil/v3 v3.24.5
+	github.com/spf13/cast v1.9.2
 	github.com/xxddpac/async v1.0.3
 	go.uber.org/zap v1.27.0
 	gopkg.in/gomail.v2 v2.0.0-20160411212932-81ebce5c23df

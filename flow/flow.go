@@ -9,6 +9,7 @@ import (
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcap"
 	ji "github.com/json-iterator/go"
+	"github.com/spf13/cast"
 	"github.com/xxddpac/async"
 	"go-flow/conf"
 	"go-flow/kafka"
@@ -47,6 +48,11 @@ type IPTraffic struct {
 	Bytes    float64 `json:"bytes"`
 	Requests int64   `json:"requests"`
 	Unit     string  `json:"unit"`
+}
+
+type IPTrafficResponse struct {
+	Data []IPTraffic `json:"data"`
+	Base
 }
 
 type PortTraffic struct {
@@ -449,6 +455,9 @@ func (w *Window) ProtocolSummary() ProtocolCache {
 		statCount += len(bucket.Stats)
 		for _, stat := range bucket.Stats {
 			proto := extractProtocol(stat.DstPort)
+			if len(proto) == 0 {
+				continue
+			}
 			protoBytes[proto] += stat.Bytes
 			portBytes[stat.DstPort] += stat.Bytes
 			totalBytes += stat.Bytes
@@ -690,23 +699,52 @@ func Capture(device string, pool *async.WorkerPool, w *Window) {
 
 func (w *Window) ServeHTTP(wr http.ResponseWriter, r *http.Request) {
 	if r.URL.Path == "/top" {
+		var (
+			page = 1
+			size = 10
+		)
 		w.cacheMu.RLock()
 		top := w.cache
 		w.cacheMu.RUnlock()
-		resp := make([]TopItem, len(top))
-		for i, s := range top {
-			resp[i] = TopItem{
-				SrcIP:     s.SrcIP,
-				DstIP:     s.DstIP,
-				DstPort:   s.DstPort,
-				Protocol:  s.Protocol,
-				Bandwidth: s.Bytes,
-				Unit:      s.Unit,
-				Requests:  s.Requests,
+		pageStr := r.URL.Query().Get("page")
+		sizeStr := r.URL.Query().Get("size")
+		keyword := r.URL.Query().Get("keyword")
+		if len(pageStr) != 0 {
+			page = cast.ToInt(pageStr)
+		}
+		if len(sizeStr) != 0 {
+			size = cast.ToInt(sizeStr)
+		}
+		resp := make([]TopItem, 0, len(top))
+		for _, s := range top {
+			matches := true
+			if len(keyword) != 0 {
+				if !strings.Contains(s.SrcIP, keyword) && !strings.Contains(s.DstIP, keyword) &&
+					!strings.Contains(s.DstPort, keyword) {
+					matches = false
+				}
+			}
+			if matches {
+				resp = append(resp, TopItem{
+					SrcIP:     s.SrcIP,
+					DstIP:     s.DstIP,
+					DstPort:   s.DstPort,
+					Protocol:  s.Protocol,
+					Bandwidth: s.Bytes,
+					Unit:      s.Unit,
+					Requests:  s.Requests,
+				})
 			}
 		}
+		start, end := paginate(page, size, len(resp))
 		response := TopResponse{
-			Data:       resp,
+			Base: Base{
+				Page:  page,
+				Size:  size,
+				Total: len(resp),
+				Pages: int(math.Ceil(float64(len(resp)) / float64(size))),
+			},
+			Data:       resp[start:end],
 			Timestamp:  w.lastCalc.Unix(),
 			WindowSize: int(w.size.Seconds()),
 			Rank:       w.Rank,
@@ -718,36 +756,98 @@ func (w *Window) ServeHTTP(wr http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.URL.Path == "/ip_top" {
+		var (
+			page = 1
+			size = 10
+		)
 		w.cacheMu.RLock()
 		top := w.ipCache
 		w.cacheMu.RUnlock()
-		resp := make([]IPTraffic, len(top))
-		for i, s := range top {
-			resp[i] = IPTraffic{
-				IP:       s.IP,
-				Unit:     s.Unit,
-				Requests: s.Requests,
-				Bytes:    s.Bytes,
+		pageStr := r.URL.Query().Get("page")
+		sizeStr := r.URL.Query().Get("size")
+		keyword := r.URL.Query().Get("keyword")
+		if len(pageStr) != 0 {
+			page = cast.ToInt(pageStr)
+		}
+		if len(sizeStr) != 0 {
+			size = cast.ToInt(sizeStr)
+		}
+		resp := make([]IPTraffic, 0, len(top))
+		for _, s := range top {
+			matches := true
+			if len(keyword) != 0 {
+				if !strings.Contains(s.IP, keyword) {
+					matches = false
+				}
+			}
+			if matches {
+				resp = append(resp, IPTraffic{
+					IP:       s.IP,
+					Unit:     s.Unit,
+					Requests: s.Requests,
+					Bytes:    s.Bytes,
+				})
 			}
 		}
+		start, end := paginate(page, size, len(resp))
+		response := IPTrafficResponse{
+			Base: Base{
+				Page:  page,
+				Size:  size,
+				Total: len(resp),
+				Pages: int(math.Ceil(float64(len(resp)) / float64(size))),
+			},
+			Data: resp[start:end],
+		}
 		wr.Header().Set("Content-Type", "application/json")
-		if err := ji.NewEncoder(wr).Encode(resp); err != nil {
+		if err := ji.NewEncoder(wr).Encode(response); err != nil {
 			http.Error(wr, "Failed to encode JSON", http.StatusInternalServerError)
 		}
 		return
 	}
 	if r.URL.Path == "/stats/ports" {
+		var (
+			page = 1
+			size = 10
+		)
 		w.cacheMu.RLock()
 		top := w.portCache
 		w.cacheMu.RUnlock()
-		response := make([]PortResponse, len(top))
-		for i, s := range top {
-			response[i] = PortResponse{
-				DstPort:  s.DstPort,
-				Bytes:    s.Bytes,
-				Protocol: s.Protocol,
-				Unit:     s.Unit,
+		pageStr := r.URL.Query().Get("page")
+		sizeStr := r.URL.Query().Get("size")
+		keyword := r.URL.Query().Get("keyword")
+		if len(pageStr) != 0 {
+			page = cast.ToInt(pageStr)
+		}
+		if len(sizeStr) != 0 {
+			size = cast.ToInt(sizeStr)
+		}
+		resp := make([]PortItem, 0, len(top))
+		for _, s := range top {
+			matches := true
+			if len(keyword) != 0 {
+				if !strings.Contains(s.DstPort, keyword) {
+					matches = false
+				}
 			}
+			if matches {
+				resp = append(resp, PortItem{
+					DstPort:  s.DstPort,
+					Bytes:    s.Bytes,
+					Protocol: s.Protocol,
+					Unit:     s.Unit,
+				})
+			}
+		}
+		start, end := paginate(page, size, len(resp))
+		response := PortItemResponse{
+			Base: Base{
+				Page:  page,
+				Size:  size,
+				Total: len(resp),
+				Pages: int(math.Ceil(float64(len(resp)) / float64(size))),
+			},
+			Data: resp[start:end],
 		}
 		wr.Header().Set("Content-Type", "application/json")
 		if err := ji.NewEncoder(wr).Encode(response); err != nil {
@@ -849,7 +949,7 @@ func extractProtocol(dstPort string) string {
 		end := len(dstPort) - 1
 		return strings.ToLower(dstPort[start:end])
 	}
-	return "other"
+	return ""
 }
 
 //go:embed index.html
@@ -867,17 +967,23 @@ type TopItem struct {
 }
 
 type TopResponse struct {
+	Base
 	Data       []TopItem `json:"data"`
 	Timestamp  int64     `json:"timestamp"`
 	WindowSize int       `json:"window_size"`
 	Rank       int       `json:"rank"`
 }
 
-type PortResponse struct {
+type PortItem struct {
 	DstPort  string  `json:"dest_port"`
 	Bytes    float64 `json:"bytes"`
 	Protocol string  `json:"protocol"`
 	Unit     string  `json:"unit"`
+}
+
+type PortItemResponse struct {
+	Data []PortItem `json:"data"`
+	Base
 }
 
 type TrendResponse struct {

@@ -52,6 +52,10 @@
             display: flex;
             justify-content: space-between;
         }
+        .deal {
+            display: flex;
+            justify-content: space-between;
+        }
     </style>
 </head>
 <body>
@@ -60,7 +64,16 @@
     const {useState, useEffect, useRef} = React;
 
     const FlowTable = () => {
+        // 搜索状态
+        //flex space-x-4 mb-4
+        const [searchTerm, setSearchTerm] = useState('');
+        // 分页状态
+        const [itemsPerPage, setItemsPerPage] = useState();
+        const [pageInput, setPageInput] = useState();
+        const [tempPageInput, setTempPageInput] = useState(1);
+
         const [data, setData] = useState([]);
+        const [dataCheckout, setDataCheckout] = useState([]);
         const [trendData, setTrendData] = useState([]);
         const [protocolStatsPie, setProtocolStatsPie] = useState([]);
         const [portStatsPie, setPortStatsPie] = useState([]);
@@ -133,10 +146,15 @@
                 setGoroutines(sysJson.workers);
 
                 let dataArray = [];
+                let dataCheckoutArray = [];
                 let protocolStats = [];
                 let portStats = [];
                 if (tab === 'traffic') {
+                    setSearchTerm('')
+                    setItemsPerPage('')
+                    setTempPageInput(1)
                     dataArray = topJson.data || [];
+                    dataCheckoutArray = topJson || [];
                 } else if (tab === 'trend') {
                     const response = await fetch('/trend', {cache: 'no-cache'});
                     if (!response.ok) {
@@ -154,14 +172,29 @@
                     setTrendData(dataArray);
                     setProtocolStatsPie(protocolStats);
                     setPortStatsPie(portStats);
-                } else {
-                    const endpoint = tab === 'ip' ? '/ip_top' : '/stats/ports';
-                    const response = await fetch(endpoint, {cache: 'no-cache'});
+                } else if(tab === 'ip') {
+                    setSearchTerm('')
+                    setItemsPerPage('')
+                    setTempPageInput(1)
+                    // const endpoint = tab === 'ip' ? '/ip_top' : '/stats/ports';
+                    const response = await fetch('/ip_top', {cache: 'no-cache'});
                     if (!response.ok) {
-                        throw new Error(`HTTP error from ${endpoint}: ${response.status}`);
+                        throw new Error(`HTTP error from /ip_top: ${response.status}`);
                     }
                     const json = await response.json();
-                    dataArray = json || [];
+                    dataArray = json.data || [];
+                    dataCheckoutArray= json || [];
+                }else{
+                    setSearchTerm('')
+                    setItemsPerPage('')
+                    setTempPageInput(1)
+                    const response = await fetch('/stats/ports', {cache: 'no-cache'});
+                    if (!response.ok) {
+                        throw new Error(`HTTP error from /stats/ports: ${response.status}`);
+                    }
+                    const json = await response.json();
+                    dataArray = json.data || [];
+                    dataCheckoutArray= json || [];
                 }
 
                 if (tab !== 'trend') {
@@ -184,6 +217,7 @@
                             return isValid;
                         });
                         setData(validData);
+                        setDataCheckout(dataCheckoutArray);
                     }
                 }
 
@@ -586,6 +620,325 @@
             ));
         };
 
+        // 根据tab获取搜索字段
+        const getSearchFields = () => {
+            switch(tab) {
+            case 'traffic':
+                return ['src_ip', 'dest_ip', 'dest_port', 'protocol', 'bandwidth'];
+            case 'ip':
+                return ['ip', 'bandwidth'];
+            case 'ports':
+                return ['dest_port', 'protocol', 'bandwidth'];
+            default:
+                return [];
+            }
+        };
+
+        // 过滤数据
+        const filteredData = data.filter(item => {
+            if (!searchTerm) return true;
+            
+            const searchFields = getSearchFields();
+            return searchFields.some(field => {
+            const value = item[field];
+            if (value === undefined || value === null) return false;
+            return value.toString().toLowerCase().includes(searchTerm.toLowerCase());
+            });
+        });
+
+        //渲染分页控件
+        const renderPagination = () => {
+            return (
+            <div className="flex items-center justify-between mt-4">
+                <div className="flex items-center">
+                    <select 
+                        className="border rounded px-2 py-1 text-sm"
+                        value={itemsPerPage}
+                        onChange={(e) => {
+                            setItemsPerPage(Number(e.target.value));
+                        }}
+                    >
+                        {[10, 20, 30, 40].map(size => (
+                            <option key={size} value={size}>{size} Items / Page</option>
+                        ))}
+                    </select>
+                </div>
+                <span className="text-sm" style={{margin: '0 10px 0 10px'}}> Total {dataCheckout.total} Items</span>
+
+                <div className="flex items-center">
+                <button
+                    className={`px-3 py-1 border rounded mr-2 text-sm ${
+                        tempPageInput == 1 || tempPageInput.length < 1
+                        ? 'bg-gray-100 text-gray-400 cursor-not-allowed' 
+                        : 'hover:bg-gray-100'
+                    }`}
+                    disabled={tempPageInput == 1 || tempPageInput.length < 1}
+                    onClick={() => {
+                        let page = tempPageInput
+                        pagesOpt(page-1)
+                    }}
+                >
+                    Previous
+                </button>
+
+                <div className="flex items-center">
+                    <span className="text-sm">Go to</span>
+                    <input
+                        className="border rounded w-14 mx-2 p-1 text-center text-sm"
+                        value={tempPageInput}
+                        onChange={(e) => setTempPageInput(e.target.value)}
+                        onKeyPress={(e) => e.key === 'Enter' && pagesOpt(tempPageInput)}
+                    />
+                    <span className="text-sm">Page / Total {dataCheckout.pages} Pages</span>
+                </div>
+
+                <button
+                    className={`px-3 py-1 border rounded ml-2 text-sm ${
+                        tempPageInput == dataCheckout.pages || tempPageInput.length < 1
+                        ? 'bg-gray-100 text-gray-400 cursor-not-allowed' 
+                        : 'hover:bg-gray-100'
+                    }`}
+                    disabled={tempPageInput == dataCheckout.pages || tempPageInput.length < 1}
+                    onClick={() => {
+                        let page = tempPageInput
+                        pagesOpt(page+1)
+                    }}
+                >
+                    Next
+                </button>
+                </div>
+            </div>
+            );
+        };
+
+        useEffect(() => {
+            if(itemsPerPage){
+                searchTable(itemsPerPage)
+            }
+        }, [itemsPerPage]);
+
+        const searchTable = async () => {
+            let pageNum = 1;
+            let size = itemsPerPage
+            if(!size){
+                size = 10
+            }
+            if(searchTerm){
+                setTempPageInput(1)
+            }else {
+                if(pageInput){
+                    pageNum = parseInt(pageInput, 10);
+                }
+            }
+            setLoading(true);
+            try {
+                let dataArray = [];
+                let dataCheckoutArray = [];
+                if (tab === 'traffic') {
+                    const topResponse = await fetch('/top?page='+1+'&size='+size+'&keyword='+searchTerm, {cache: 'no-cache'});
+                    if (!topResponse.ok) {
+                        throw new Error(`HTTP error from /top: ${topResponse.status}`);
+                    }
+                    const topJson = await topResponse.json();
+                    dataArray = topJson.data || [];
+                    dataCheckoutArray = topJson || [];
+                }else if (tab === 'ip'){
+                    const response = await fetch('/ip_top?page='+1+'&size='+size+'&keyword='+searchTerm, {cache: 'no-cache'});
+                    if (!response.ok) {
+                        throw new Error(`HTTP error from /ip_top: ${response.status}`);
+                    }
+                    const json = await response.json();
+                    dataArray = json.data || [];
+                    dataCheckoutArray = json || [];
+                }else if (tab === 'ports'){
+                    const response = await fetch('/stats/ports?page='+1+'&size='+size+'&keyword='+searchTerm, {cache: 'no-cache'});
+                    if (!response.ok) {
+                        throw new Error(`HTTP error from /stats/ports: ${response.status}`);
+                    }
+                    const json = await response.json();
+                    dataArray = json.data || [];
+                    dataCheckoutArray = json || [];
+                }
+
+                if (tab !== 'trend') {
+                    if (!dataArray || !Array.isArray(dataArray)) {
+                        console.error(`Invalid or no data in response:`, dataArray);
+                        setData([]);
+                    } else {
+                        const validData = dataArray.filter(item => {
+                            let isValid;
+                            if (tab === 'traffic') {
+                                isValid = item.src_ip && item.dest_ip && item.dest_port !== undefined && item.protocol && item.bandwidth !== undefined && item.unit && item.requests !== undefined;
+                            } else if (tab === 'ip') {
+                                isValid = item.ip && item.bytes !== undefined && item.requests !== undefined && item.unit;
+                            } else {
+                                isValid = item.dest_port && item.protocol && item.bytes !== undefined && item.unit;
+                            }
+                            if (!isValid) {
+                                console.error(`Invalid item in ${tab} data:`, item);
+                            }
+                            return isValid;
+                        });
+                        setData(validData);
+                        setDataCheckout(dataCheckoutArray);
+                    }
+                }
+
+                setError(null);
+            } catch (err) {
+                console.error(`Fetch error:`, err);
+                setError(err.message);
+                setData([]);
+                if (tab === 'trend') setTrendData([]);
+            } finally {
+                setLoading(false);
+            }
+        }
+
+        const pagesOpt = (page) => {
+            let pageNum = 1;
+            const num = Number(page);
+            if(!isNaN(num) && Number.isInteger(num) && num != 0){
+                if(num > dataCheckout.pages){
+                    pageNum = dataCheckout.pages;
+                    setPageInput(pageNum)
+                    setTempPageInput(pageNum)
+                }else if(num < 0 ){
+                    pageNum = 1;
+                    setPageInput(pageNum)
+                    setTempPageInput(pageNum)
+                }else{
+                    pageNum = num;
+                    setPageInput(pageNum)
+                    setTempPageInput(pageNum)
+                }
+            }else{
+                setPageInput(1)
+                setTempPageInput(1)
+            }
+            //jumpTable()
+        }
+
+        useEffect(() => {
+            if(pageInput){
+                jumpTable(pageInput)
+            }
+        }, [pageInput]);
+
+        const jumpTable = async () => {
+            let size = itemsPerPage
+            if(!size){
+                size = 10
+            }
+            let pageNum = Number(pageInput);
+            setLoading(true);
+            try {
+                let dataArray = [];
+                let dataCheckoutArray = [];
+                if (tab === 'traffic') {
+                    const topResponse = await fetch('/top?page='+pageNum+'&size='+size+'&keyword='+searchTerm, {cache: 'no-cache'});
+                    if (!topResponse.ok) {
+                        throw new Error(`HTTP error from /top: ${topResponse.status}`);
+                    }
+                    const topJson = await topResponse.json();
+                    dataArray = topJson.data || [];
+                    dataCheckoutArray = topJson || [];
+                }else if (tab === 'ip'){
+                    const response = await fetch('/ip_top?page='+pageNum+'&size='+size+'&keyword='+searchTerm, {cache: 'no-cache'});
+                    if (!response.ok) {
+                        throw new Error(`HTTP error from /ip_top: ${response.status}`);
+                    }
+                    const json = await response.json();
+                    dataArray = json.data || [];
+                    dataCheckoutArray = json || [];
+                }else if (tab === 'ports'){
+                    const response = await fetch('/stats/ports?page='+pageNum+'&size='+size+'&keyword='+searchTerm, {cache: 'no-cache'});
+                    if (!response.ok) {
+                        throw new Error(`HTTP error from /stats/ports: ${response.status}`);
+                    }
+                    const json = await response.json();
+                    dataArray = json.data || [];
+                    dataCheckoutArray = json || [];
+                }
+
+                if (tab !== 'trend') {
+                    if (!dataArray || !Array.isArray(dataArray)) {
+                        console.error(`Invalid or no data in response:`, dataArray);
+                        setData([]);
+                    } else {
+                        const validData = dataArray.filter(item => {
+                            let isValid;
+                            if (tab === 'traffic') {
+                                isValid = item.src_ip && item.dest_ip && item.dest_port !== undefined && item.protocol && item.bandwidth !== undefined && item.unit && item.requests !== undefined;
+                            } else if (tab === 'ip') {
+                                isValid = item.ip && item.bytes !== undefined && item.requests !== undefined && item.unit;
+                            } else {
+                                isValid = item.dest_port && item.protocol && item.bytes !== undefined && item.unit;
+                            }
+                            if (!isValid) {
+                                console.error(`Invalid item in ${tab} data:`, item);
+                            }
+                            return isValid;
+                        });
+                        setData(validData);
+                        setDataCheckout(dataCheckoutArray);
+                    }
+                }
+
+                setError(null);
+            } catch (err) {
+                console.error(`Fetch error:`, err);
+                setError(err.message);
+                setData([]);
+                if (tab === 'trend') setTrendData([]);
+            } finally {
+                setLoading(false);
+            }
+        }
+
+        // <button
+        //     onClick={fetchData}
+        //     disabled={loading}
+        //     className={`p-2 rounded-full text-white focus:outline-none ${
+        //         loading
+        //             ? 'bg-blue-300 cursor-not-allowed'
+        //             : 'bg-blue-500 hover:bg-blue-600'
+        //     }`}
+        //     title={loading ? 'Loading...' : 'Refresh Data'}
+        // >
+        //     {loading ? (
+        //         <svg
+        //             className="h-6 w-6 animate-spin"
+        //             xmlns="http://www.w3.org/2000/svg"
+        //             fill="none"
+        //             viewBox="0 0 24 24"
+        //             stroke="currentColor"
+        //         >
+        //             <path
+        //                 strokeLinecap="round"
+        //                 strokeLinejoin="round"
+        //                 strokeWidth={2}
+        //                 d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"
+        //             />
+        //         </svg>
+        //     ) : (
+        //         <svg
+        //             className="h-6 w-6"
+        //             xmlns="http://www.w3.org/2000/svg"
+        //             fill="none"
+        //             viewBox="0 0 24 24"
+        //             stroke="currentColor"
+        //         >
+        //             <path
+        //                 strokeLinecap="round"
+        //                 strokeLinejoin="round"
+        //                 strokeWidth={2}
+        //                 d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+        //             />
+        //         </svg>
+        //     )}
+        // </button>
+
         return (
             <div className="container mx-auto p-4">
                 <div className="bg-white shadow-md rounded-lg p-6 relative">
@@ -611,48 +964,8 @@
   </span>
                         </h1>
 
-                        <button
-                            onClick={fetchData}
-                            disabled={loading}
-                            className={`p-2 rounded-full text-white focus:outline-none ${
-                                loading
-                                    ? 'bg-blue-300 cursor-not-allowed'
-                                    : 'bg-blue-500 hover:bg-blue-600'
-                            }`}
-                            title={loading ? 'Loading...' : 'Refresh Data'}
-                        >
-                            {loading ? (
-                                <svg
-                                    className="h-6 w-6 animate-spin"
-                                    xmlns="http://www.w3.org/2000/svg"
-                                    fill="none"
-                                    viewBox="0 0 24 24"
-                                    stroke="currentColor"
-                                >
-                                    <path
-                                        strokeLinecap="round"
-                                        strokeLinejoin="round"
-                                        strokeWidth={2}
-                                        d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"
-                                    />
-                                </svg>
-                            ) : (
-                                <svg
-                                    className="h-6 w-6"
-                                    xmlns="http://www.w3.org/2000/svg"
-                                    fill="none"
-                                    viewBox="0 0 24 24"
-                                    stroke="currentColor"
-                                >
-                                    <path
-                                        strokeLinecap="round"
-                                        strokeLinejoin="round"
-                                        strokeWidth={2}
-                                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-                                    />
-                                </svg>
-                            )}
-                        </button>
+
+
                     </div>
                     {timestamp > 0 && windowSize > 0 && (
                         <>
@@ -699,47 +1012,80 @@
                         </>
 
                     )}
-                    <div className="flex space-x-4 mb-4">
-                        <button
-                            onClick={() => setTab('traffic')}
-                            className={`px-4 py-2 rounded-md font-semibold ${
-                                tab === 'traffic'
-                                    ? 'bg-blue-600 text-white'
-                                    : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                            }`}
-                        >
-                            Sessions
-                        </button>
-                        <button
-                            onClick={() => setTab('ip')}
-                            className={`px-4 py-2 rounded-md font-semibold ${
-                                tab === 'ip'
-                                    ? 'bg-blue-600 text-white'
-                                    : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                            }`}
-                        >
-                            IP Stats
-                        </button>
-                        <button
-                            onClick={() => setTab('ports')}
-                            className={`px-4 py-2 rounded-md font-semibold ${
-                                tab === 'ports'
-                                    ? 'bg-blue-600 text-white'
-                                    : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                            }`}
-                        >
-                            Port Stats
-                        </button>
-                        <button
-                            onClick={() => setTab('trend')}
-                            className={`px-4 py-2 rounded-md font-semibold ${
-                                tab === 'trend'
-                                    ? 'bg-blue-600 text-white'
-                                    : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                            }`}
-                        >
-                            Trend
-                        </button>
+                    <div className="deal">
+                        <div className='flex space-x-4 mb-4'>
+                            <button
+                                onClick={() => setTab('traffic')}
+                                className={`px-4 py-2 rounded-md font-semibold ${
+                                    tab === 'traffic'
+                                        ? 'bg-blue-600 text-white'
+                                        : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                                }`}
+                            >
+                                Sessions
+                            </button>
+                            <button
+                                onClick={() => setTab('ip')}
+                                className={`px-4 py-2 rounded-md font-semibold ${
+                                    tab === 'ip'
+                                        ? 'bg-blue-600 text-white'
+                                        : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                                }`}
+                            >
+                                IP Stats
+                            </button>
+                            <button
+                                onClick={() => setTab('ports')}
+                                className={`px-4 py-2 rounded-md font-semibold ${
+                                    tab === 'ports'
+                                        ? 'bg-blue-600 text-white'
+                                        : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                                }`}
+                            >
+                                Port Stats
+                            </button>
+                            <button
+                                onClick={() => setTab('trend')}
+                                className={`px-4 py-2 rounded-md font-semibold ${
+                                    tab === 'trend'
+                                        ? 'bg-blue-600 text-white'
+                                        : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                                }`}
+                            >
+                                Trend
+                            </button>
+                        </div>
+                        
+                        {tab !== 'trend' && data.length > 0 && (
+                            <div className="flex mb-4">
+                                <input
+                                    style={{marginRight: '10px', borderRadius: '10px'}}
+                                    type="text"
+                                    className="border rounded-l px-4 py-2 w-full focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                    placeholder={`Fuzzy search`}
+                                    value={searchTerm}
+                                    onChange={(e) => {
+                                        setSearchTerm(e.target.value);
+                                    }}
+                                />
+                                <button
+                                    onClick={() => setSearchTerm('')}
+                                    style={{marginRight:'10px',width:'100px'}}
+                                    className={`px-4 py-2 rounded-md font-semibold bg-blue-600 text-white`}
+                                >
+                                    Reset
+                                </button>
+                                <button
+                                    onClick={() => searchTable()}
+                                    style={{width:'100px'}}
+                                    className={`px-4 py-2 rounded-md font-semibold bg-blue-600 text-white`}
+                                >
+                                    Search
+                                </button>
+                            </div>
+                        )}
+                       
+                        
                     </div>
                     {loading && (
                         <div className="absolute inset-0 bg-gray-100 bg-opacity-50 flex items-center justify-center">
@@ -747,19 +1093,44 @@
                         </div>
                     )}
                     {error && <p className="text-red-500 text-center">{error}</p>}
-                    {tab !== 'trend' && data.length === 0 && !error && !loading &&
-                        <p className="text-center">No data available</p>}
+                    {tab !== 'trend' && data.length === 0 && !error && !loading &&(
+                        <div>
+                           <div>
+                                <table className="min-w-full bg-white border">
+                                    <thead>
+                                    <tr className="bg-gray-200 text-gray-600 uppercase text-sm">
+                                        {renderTableHeaders()}
+                                    </tr>
+                                    </thead>
+                                </table>
+                            </div>
+                            <p style={{marginTop:'20px'}} className="text-center">No data available</p>
+                        </div>
+                    )}
                     {tab !== 'trend' && data.length > 0 && (
-                        <table className="min-w-full bg-white border">
-                            <thead>
-                            <tr className="bg-gray-200 text-gray-600 uppercase text-sm">
-                                {renderTableHeaders()}
-                            </tr>
-                            </thead>
-                            <tbody>
-                            {renderTableRows()}
-                            </tbody>
-                        </table>
+                        <div> 
+                           <div>
+                                <table className="min-w-full bg-white border">
+                                    <thead>
+                                    <tr className="bg-gray-200 text-gray-600 uppercase text-sm">
+                                        {renderTableHeaders()}
+                                    </tr>
+                                    </thead>
+                                    <tbody>
+                                    {renderTableRows()}
+                                    </tbody>
+                                </table>
+                            </div>
+                            {data.length > 0 && (
+                                <div className="mt-6">
+                                    <div className="flex justify-between items-center">
+                                        <span className="text-sm text-gray-600">
+                                        </span>
+                                        {renderPagination()}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
                     )}
                     {tab === 'trend' && trendData.length === 0 && !error && !loading &&
                         <p className="text-center">No trend data available</p>}

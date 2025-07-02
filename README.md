@@ -1,4 +1,7 @@
-<p align="center"><em>轻量级高性能网络流量分析工具</em></p>
+<p align="center">
+    <strong><span style="font-size: 24px;">🚀 A Lightweight and High-Performance Network Traffic Analyzer built with Go</span></strong>
+</p>
+
 
 ---
 

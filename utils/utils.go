@@ -3,7 +3,6 @@ package utils
 import (
 	"context"
 	"fmt"
-	"github.com/google/gopacket/pcap"
 	"github.com/shirou/gopsutil/v3/cpu"
 	"github.com/shirou/gopsutil/v3/mem"
 	"net"
@@ -51,25 +50,6 @@ func IsValidIP(ip string) bool {
 		return false
 	}
 	return true
-}
-
-func ListAvailableDevices() {
-	devices, err := pcap.FindAllDevs()
-	if err != nil {
-		fmt.Printf("无法获取网卡列表: %v\n", err)
-		return
-	}
-	if len(devices) == 0 {
-		fmt.Println("未发现任何可用网卡。")
-		return
-	}
-	for _, dev := range devices {
-		fmt.Printf("- %s", dev.Name)
-		if dev.Description != "" {
-			fmt.Printf(" (%s)", dev.Description)
-		}
-		fmt.Println()
-	}
 }
 
 func GetLocalIp() string {

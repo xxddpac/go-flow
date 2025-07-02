@@ -55,7 +55,6 @@ func Push(msg []byte) {
 	select {
 	case Queue <- msg:
 	default:
-		zlog.Warnf("Kafka", "Kafka queue is full, dropping message")
 	}
 }
 

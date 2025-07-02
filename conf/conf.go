@@ -30,11 +30,13 @@ type config struct {
 }
 
 type Server struct {
-	Port    int
-	Workers int
-	Size    int
-	Rank    int
-	Eth     string
+	Port       int
+	Workers    int
+	Size       int
+	Rank       int
+	Eth        string
+	Interval   int
+	PacketChan int
 }
 
 type WeCom struct {

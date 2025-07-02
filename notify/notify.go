@@ -17,16 +17,14 @@ var (
 )
 
 var (
-	ns             = make([]Notify, 0, 10)
-	ddosChan       = make(chan DdosAlert, 100)
-	isNotifyEnable bool
-	whitelist      []string
+	ns        = make([]Notify, 0, 10)
+	ddosChan  = make(chan DdosAlert, 100)
+	whitelist []string
 )
 
 func Init(wg *sync.WaitGroup) {
 	defer wg.Done()
 	whitelist = conf.CoreConf.Notify.Whitelist
-	isNotifyEnable = conf.CoreConf.Notify.Enable
 	if conf.CoreConf.Mail.Enable {
 		ns = append(ns, &Mail{})
 	}
@@ -39,9 +37,6 @@ func Init(wg *sync.WaitGroup) {
 			close(ddosChan)
 			return
 		case d := <-ddosChan:
-			if !isNotifyEnable {
-				continue
-			}
 			for _, n := range ns {
 				if err := n.Send(d); err != nil {
 					zlog.Errorf("Notify", "send notify error: %v", err)

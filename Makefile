@@ -2,7 +2,6 @@ APP_NAME = go-flow
 SRC = .
 BIN_DIR = bin
 BINARY_LINUX = $(BIN_DIR)/$(APP_NAME)
-BINARY_WIN = $(BIN_DIR)/$(APP_NAME).exe
 GO = go
 
 LIBPCAP_VERSION = 1.10.1
@@ -12,12 +11,12 @@ LIBPCAP_URL = https://www.tcpdump.org/release/$(LIBPCAP_TAR)
 LIBPCAP_PREFIX = /usr/local
 
 .PHONY: all
-all: build-linux build-windows
+all: build
 
 .PHONY: install-build-deps
 install-build-deps:
 	@echo "Installing build dependencies..."
-	@sudo yum install -y gcc make autoconf automake libtool wget curl flex bison mingw64-gcc mingw64-gcc-c++ || true
+	@sudo yum install -y gcc make autoconf automake libtool wget curl flex bison || true
 
 .PHONY: install-libpcap-static
 install-libpcap-static: install-build-deps
@@ -33,20 +32,12 @@ install-libpcap-static: install-build-deps
 		echo "libpcap static library already installed."; \
 	fi
 
-.PHONY: build-linux
-build-linux: install-libpcap-static
+.PHONY: build
+build: install-libpcap-static
 	@echo "Building $(APP_NAME) for Linux (static)..."
 	@mkdir -p $(BIN_DIR)
 	@CGO_LDFLAGS="-L$(LIBPCAP_PREFIX)/lib" CGO_ENABLED=1 GOOS=linux GOARCH=amd64 \
 		$(GO) build -a -ldflags '-extldflags "-static"' -o $(BINARY_LINUX) $(SRC)
-
-.PHONY: build-windows
-build-windows:
-	@echo "Building $(APP_NAME) for Windows (static)..."
-	@mkdir -p $(BIN_DIR)
-	@CC=x86_64-w64-mingw32-gcc \
-	CGO_ENABLED=1 GOOS=windows GOARCH=amd64 \
-	$(GO) build -a -ldflags "-extldflags '-static'" -o $(BINARY_WIN) $(SRC)
 
 .PHONY: clean
 clean:

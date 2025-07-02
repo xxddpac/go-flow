@@ -1,9 +1,10 @@
 [server]
-Workers = 2000 # 解析数据包协程数
+Workers = 5000 # 解析数据包协程数
 Size = 10 # 滑动窗口大小(分钟)
 Rank = 30 # 滑动窗口内的流量排名数
-Eth = "\\Device\\NPF_{A71580F4-5312-4FF8-B88B-3D935E2CACB1}" # 网卡名称，替换为自己的网卡名称
-#Eth = "em0"
+PacketChan = 500000 # 数据包通道大小
+Interval = 2 # 缓存更新间隔(秒)，用于页面数据支撑
+Eth = "em1" # 网卡名称
 Port = 31415 # WEB监听端口
 
 
@@ -12,8 +13,8 @@ Enable = false # 是否启用通知，true启用
 ThresholdValue = 10 # 大流量告警阈值
 ThresholdUnit = "GB" # 大流量告警单位，GB或MB
 FrequencyThreshold = 10000 # 高频请求告警阈值
-WhiteList = ["10.18.1.1", "10.18.1.2"] # 告警忽略白名单IP
-Location = "办公网" # 流量镜像服务器位置
+WhiteList = ["", ""] # 告警忽略白名单IP
+Location = "IDC" # 流量镜像服务器位置
 
 [wecom]
 Enable = false # 是否启用企业微信通知，true启用
@@ -33,10 +34,10 @@ Cc = [""] # 抄送人地址
 Enable = false # 是否启用Kafka，true启用
 Brokers = ["", "", ""] # brokers集群地址
 Topic = "" # topic名称
-Size = 20000 # Kafka消息队列大小
+Size = 500000 # Kafka消息队列大小
 
 [log]
-LogPath = "" # 日志路径，为空将输出控制台
+LogPath = "/var/log/go_flow.log" # 日志路径，为空将输出控制台
 LogLevel = "debug" # 日志级别
 MaxSize = 10 # 日志文件大小(MB)
 Compress = true # 是否压缩日志文件

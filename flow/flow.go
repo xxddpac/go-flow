@@ -6,26 +6,31 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/google/gopacket"
+	"github.com/google/gopacket/afpacket"
 	"github.com/google/gopacket/layers"
-	"github.com/google/gopacket/pcap"
 	ji "github.com/json-iterator/go"
+	"github.com/panjf2000/ants/v2"
 	"github.com/spf13/cast"
-	"github.com/xxddpac/async"
 	"go-flow/conf"
 	"go-flow/kafka"
 	"go-flow/notify"
 	"go-flow/utils"
+	"go-flow/zlog"
+	"log"
 	"math"
 	"net/http"
-	"os"
 	"runtime"
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
-var syncPool = sync.Pool{New: func() interface{} { return &Traffic{} }}
+var (
+	syncPool       = sync.Pool{New: func() interface{} { return &Traffic{} }}
+	counter  int64 = 0
+)
 
 const (
 	highFrequency = "高频请求预警"
@@ -229,12 +234,54 @@ func (w *Window) Add(traffic Traffic) {
 	w.freqStatsMu.Unlock()
 }
 
-func (w *Window) Summary() []Traffic {
-	w.bucketMu.RLock()
-	defer w.bucketMu.RUnlock()
+func (w *Window) StartCacheUpdate(wg *sync.WaitGroup) {
+	defer wg.Done()
+	ticker := time.NewTicker(time.Second * time.Duration(conf.CoreConf.Server.Interval))
+	for {
+		select {
+		case <-ticker.C:
+			// deep copy
+			w.bucketMu.RLock()
+			bucketsCopy := make([]*Bucket, len(w.buckets))
+			for i, b := range w.buckets {
+				if b == nil {
+					continue
+				}
+				statsCopy := make(map[string]Traffic, len(b.Stats))
+				for k, v := range b.Stats {
+					statsCopy[k] = v
+				}
+				bucketsCopy[i] = &Bucket{
+					Timestamp: b.Timestamp,
+					Stats:     statsCopy,
+				}
+			}
+			w.bucketMu.RUnlock()
 
+			traffic := topTrafficHeap(aggregateTrafficStats(bucketsCopy), w.Rank)
+			ip := topIPHeap(aggregateIPStats(bucketsCopy), w.Rank)
+			port := topPortHeap(aggregatePortStats(bucketsCopy), w.Rank)
+			trend := completeTrend(aggregateTrendMap(bucketsCopy), len(w.buckets))
+			proto := topProtoStatsFromSnapshot(bucketsCopy)
+
+			w.cacheMu.Lock()
+			w.cache = traffic
+			w.ipCache = ip
+			w.portCache = port
+			w.trendCache = trend
+			w.protoCache = proto
+			w.lastCalc = time.Now()
+			w.cacheMu.Unlock()
+		case <-utils.Ctx.Done():
+			ticker.Stop()
+			return
+		}
+	}
+}
+
+func aggregateTrafficStats(buckets []*Bucket) map[string]Traffic {
 	trafficStats := make(map[string]Traffic)
-	for _, bucket := range w.buckets {
+	for _, bucket := range buckets {
 		if bucket.Timestamp == 0 {
 			continue
 		}
@@ -249,45 +296,12 @@ func (w *Window) Summary() []Traffic {
 			trafficStats[key] = agg
 		}
 	}
-
-	h := &TrafficHeap{}
-	heap.Init(h)
-	for _, s := range trafficStats {
-		if s.Bytes <= 0 {
-			continue
-		}
-		mb := s.Bytes / 1e6
-		if mb >= 1000 {
-			s.Bytes = mb / 1000
-			s.Unit = "GB"
-		} else {
-			s.Bytes = mb
-			s.Unit = "MB"
-		}
-		if h.Len() < w.Rank {
-			heap.Push(h, s)
-		} else if s.Bytes*getUnitFactor(s.Unit) > (*h)[0].Bytes*getUnitFactor((*h)[0].Unit) {
-			heap.Pop(h)
-			heap.Push(h, s)
-		}
-	}
-
-	result := make([]Traffic, h.Len())
-	for i := h.Len() - 1; i >= 0; i-- {
-		result[i] = heap.Pop(h).(Traffic)
-	}
-	sort.Slice(result, func(i, j int) bool {
-		return result[i].Bytes*getUnitFactor(result[i].Unit) > result[j].Bytes*getUnitFactor(result[j].Unit)
-	})
-	return result
+	return trafficStats
 }
 
-func (w *Window) IPSummary() []IPTraffic {
-	w.bucketMu.RLock()
-	defer w.bucketMu.RUnlock()
-
+func aggregateIPStats(buckets []*Bucket) map[string]IPTraffic {
 	ipStatsMap := make(map[string]IPTraffic)
-	for _, bucket := range w.buckets {
+	for _, bucket := range buckets {
 		if bucket.Timestamp == 0 {
 			continue
 		}
@@ -299,45 +313,12 @@ func (w *Window) IPSummary() []IPTraffic {
 			ipStatsMap[stat.SrcIP] = ipStat
 		}
 	}
-
-	h := &IPTrafficHeap{}
-	heap.Init(h)
-	for _, s := range ipStatsMap {
-		if s.Bytes <= 0 {
-			continue
-		}
-		mb := s.Bytes / 1e6
-		if mb >= 1000 {
-			s.Bytes = mb / 1000
-			s.Unit = "GB"
-		} else {
-			s.Bytes = mb
-			s.Unit = "MB"
-		}
-		if h.Len() < w.Rank {
-			heap.Push(h, s)
-		} else if s.Bytes*getUnitFactor(s.Unit) > (*h)[0].Bytes*getUnitFactor((*h)[0].Unit) {
-			heap.Pop(h)
-			heap.Push(h, s)
-		}
-	}
-
-	result := make([]IPTraffic, h.Len())
-	for i := h.Len() - 1; i >= 0; i-- {
-		result[i] = heap.Pop(h).(IPTraffic)
-	}
-	sort.Slice(result, func(i, j int) bool {
-		return result[i].Bytes*getUnitFactor(result[i].Unit) > result[j].Bytes*getUnitFactor(result[j].Unit)
-	})
-	return result
+	return ipStatsMap
 }
 
-func (w *Window) PortSummary() []PortTraffic {
-	w.bucketMu.RLock()
-	defer w.bucketMu.RUnlock()
-
+func aggregatePortStats(buckets []*Bucket) map[string]PortTraffic {
 	portStats := make(map[string]PortTraffic)
-	for _, bucket := range w.buckets {
+	for _, bucket := range buckets {
 		if bucket.Timestamp == 0 {
 			continue
 		}
@@ -350,45 +331,12 @@ func (w *Window) PortSummary() []PortTraffic {
 			portStats[key] = portStat
 		}
 	}
-
-	h := &PortTrafficHeap{}
-	heap.Init(h)
-	for _, s := range portStats {
-		if s.Bytes <= 0 {
-			continue
-		}
-		mb := s.Bytes / 1e6
-		unit := "MB"
-		if mb >= 1000 {
-			s.Bytes = mb / 1000
-			unit = "GB"
-		} else {
-			s.Bytes = mb
-		}
-		s.Unit = unit
-		if h.Len() < w.Rank {
-			heap.Push(h, s)
-		} else if s.Bytes*getUnitFactor(s.Unit) > (*h)[0].Bytes*getUnitFactor((*h)[0].Unit) {
-			heap.Pop(h)
-			heap.Push(h, s)
-		}
-	}
-
-	result := make([]PortTraffic, h.Len())
-	for i := h.Len() - 1; i >= 0; i-- {
-		result[i] = heap.Pop(h).(PortTraffic)
-	}
-	sort.Slice(result, func(i, j int) bool {
-		return result[i].Bytes*getUnitFactor(result[i].Unit) > result[j].Bytes*getUnitFactor(result[j].Unit)
-	})
-	return result
+	return portStats
 }
 
-func (w *Window) TrendSummary() []TrendItem {
-	w.bucketMu.RLock()
-	defer w.bucketMu.RUnlock()
+func aggregateTrendMap(buckets []*Bucket) map[int64]TrendItem {
 	trendMap := make(map[int64]TrendItem)
-	for _, bucket := range w.buckets {
+	for _, bucket := range buckets {
 		if bucket.Timestamp == 0 {
 			continue
 		}
@@ -402,16 +350,101 @@ func (w *Window) TrendSummary() []TrendItem {
 			item.Bytes += stat.Bytes
 			item.Requests += stat.Requests
 		}
-		mb := item.Bytes / 1e6
-		if mb >= 1000 {
-			item.Bytes = mb / 1000
-			item.Unit = "GB"
-		} else {
-			item.Bytes = mb
-		}
+		item.Bytes = item.Bytes / 1e6
 		trendMap[bucket.Timestamp] = item
 	}
+	return trendMap
+}
 
+func topTrafficHeap(m map[string]Traffic, rank int) []Traffic {
+	h := &TrafficHeap{}
+	heap.Init(h)
+	for _, s := range m {
+		if s.Bytes <= 0 {
+			continue
+		}
+		mb := s.Bytes / 1e6
+		if mb >= 1000 {
+			s.Bytes = mb / 1000
+			s.Unit = "GB"
+		} else {
+			s.Bytes = mb
+			s.Unit = "MB"
+		}
+		if h.Len() < rank {
+			heap.Push(h, s)
+		} else if s.Bytes*getUnitFactor(s.Unit) > (*h)[0].Bytes*getUnitFactor((*h)[0].Unit) {
+			heap.Pop(h)
+			heap.Push(h, s)
+		}
+	}
+	result := make([]Traffic, h.Len())
+	for i := h.Len() - 1; i >= 0; i-- {
+		result[i] = heap.Pop(h).(Traffic)
+	}
+	return result
+}
+
+func topIPHeap(m map[string]IPTraffic, rank int) []IPTraffic {
+	h := &IPTrafficHeap{}
+	heap.Init(h)
+	for _, s := range m {
+		if s.Bytes <= 0 {
+			continue
+		}
+		mb := s.Bytes / 1e6
+		if mb >= 1000 {
+			s.Bytes = mb / 1000
+			s.Unit = "GB"
+		} else {
+			s.Bytes = mb
+			s.Unit = "MB"
+		}
+		if h.Len() < rank {
+			heap.Push(h, s)
+		} else if s.Bytes*getUnitFactor(s.Unit) > (*h)[0].Bytes*getUnitFactor((*h)[0].Unit) {
+			heap.Pop(h)
+			heap.Push(h, s)
+		}
+	}
+	result := make([]IPTraffic, h.Len())
+	for i := h.Len() - 1; i >= 0; i-- {
+		result[i] = heap.Pop(h).(IPTraffic)
+	}
+	return result
+}
+
+func topPortHeap(m map[string]PortTraffic, rank int) []PortTraffic {
+	h := &PortTrafficHeap{}
+	heap.Init(h)
+	for _, s := range m {
+		if s.Bytes <= 0 {
+			continue
+		}
+		mb := s.Bytes / 1e6
+		unit := "MB"
+		if mb >= 1000 {
+			s.Bytes = mb / 1000
+			unit = "GB"
+		} else {
+			s.Bytes = mb
+		}
+		s.Unit = unit
+		if h.Len() < rank {
+			heap.Push(h, s)
+		} else if s.Bytes*getUnitFactor(s.Unit) > (*h)[0].Bytes*getUnitFactor((*h)[0].Unit) {
+			heap.Pop(h)
+			heap.Push(h, s)
+		}
+	}
+	result := make([]PortTraffic, h.Len())
+	for i := h.Len() - 1; i >= 0; i-- {
+		result[i] = heap.Pop(h).(PortTraffic)
+	}
+	return result
+}
+
+func completeTrend(trendMap map[int64]TrendItem, total int) []TrendItem {
 	result := make([]TrendItem, 0, len(trendMap))
 	for _, item := range trendMap {
 		result = append(result, item)
@@ -419,10 +452,9 @@ func (w *Window) TrendSummary() []TrendItem {
 	sort.Slice(result, func(i, j int) bool {
 		return result[i].Timestamp < result[j].Timestamp
 	})
-
-	if len(result) < len(w.buckets) {
+	if len(result) < total {
 		now := time.Now().Truncate(time.Minute).Unix()
-		for ts := now - int64(w.size.Seconds()) + 60; ts <= now; ts += 60 {
+		for ts := now - int64(total)*60 + 60; ts <= now; ts += 60 {
 			if _, exists := trendMap[ts]; !exists {
 				result = append(result, TrendItem{
 					Timestamp: ts,
@@ -436,34 +468,31 @@ func (w *Window) TrendSummary() []TrendItem {
 			return result[i].Timestamp < result[j].Timestamp
 		})
 	}
-
 	return result
 }
 
-func (w *Window) ProtocolSummary() ProtocolCache {
-	w.bucketMu.RLock()
-	defer w.bucketMu.RUnlock()
-
+func topProtoStatsFromSnapshot(buckets []*Bucket) ProtocolCache {
 	protoBytes := make(map[string]float64)
 	portBytes := make(map[string]float64)
 	totalBytes := 0.0
-	statCount := 0
-	for _, bucket := range w.buckets {
+	for _, bucket := range buckets {
 		if bucket.Timestamp == 0 {
 			continue
 		}
-		statCount += len(bucket.Stats)
 		for _, stat := range bucket.Stats {
 			proto := extractProtocol(stat.DstPort)
-			if len(proto) == 0 {
+			if proto == "" {
 				continue
 			}
-			protoBytes[proto] += stat.Bytes
-			portBytes[stat.DstPort] += stat.Bytes
-			totalBytes += stat.Bytes
+			protoBytes[proto] += float64(stat.Bytes)
+			portBytes[stat.DstPort] += float64(stat.Bytes)
+			totalBytes += float64(stat.Bytes)
 		}
 	}
+	return topProtoStats(protoBytes, portBytes, totalBytes)
+}
 
+func topProtoStats(protoBytes, portBytes map[string]float64, totalBytes float64) ProtocolCache {
 	protoHeap := &StatHeap{}
 	heap.Init(protoHeap)
 	for proto, bytes := range protoBytes {
@@ -483,11 +512,9 @@ func (w *Window) ProtocolSummary() ProtocolCache {
 			heap.Push(protoHeap, stat)
 		}
 	}
-
 	protocolStats := make([]ProtocolStat, 0, protoHeap.Len())
 	for protoHeap.Len() > 0 {
-		stat := heap.Pop(protoHeap).(ProtocolStat)
-		protocolStats = append(protocolStats, stat)
+		protocolStats = append(protocolStats, heap.Pop(protoHeap).(ProtocolStat))
 	}
 	sort.Slice(protocolStats, func(i, j int) bool {
 		return protocolStats[i].Percent > protocolStats[j].Percent
@@ -513,7 +540,6 @@ func (w *Window) ProtocolSummary() ProtocolCache {
 			heap.Push(portHeap, pt)
 		}
 	}
-
 	portStats := make([]ProtocolStat, 0, 5)
 	for portHeap.Len() > 0 {
 		pt := heap.Pop(portHeap).(PortTraffic)
@@ -534,167 +560,247 @@ func (w *Window) ProtocolSummary() ProtocolCache {
 	}
 }
 
-func (w *Window) StartCacheUpdate(wg *sync.WaitGroup) {
-	defer wg.Done()
-	ticker := time.NewTicker(2 * time.Second)
-	for {
-		select {
-		case <-ticker.C:
-			result := w.Summary()
-			ipResult := w.IPSummary()
-			portResult := w.PortSummary()
-			trendResult := w.TrendSummary()
-			protoResult := w.ProtocolSummary()
-			w.cacheMu.Lock()
-			w.cache = result
-			w.ipCache = ipResult
-			w.portCache = portResult
-			w.trendCache = trendResult
-			w.protoCache = protoResult
-			w.lastCalc = time.Now()
-			w.cacheMu.Unlock()
-		case <-utils.Ctx.Done():
-			ticker.Stop()
-			return
-		}
-	}
+type PacketData struct {
+	Data      []byte
+	Timestamp time.Time
 }
 
-func Capture(device string, pool *async.WorkerPool, w *Window) {
-	handle, err := pcap.OpenLive(device, 2048, true, pcap.BlockForever)
+func Capture(device string, w *Window, wg *sync.WaitGroup) {
+	var (
+		packetChan   = make(chan PacketData, conf.CoreConf.Server.PacketChan)
+		err          error
+		batchSize    = 1000
+		numConsumers = runtime.NumCPU()
+		producerWg   sync.WaitGroup
+		consumerWg   sync.WaitGroup
+	)
+
+	defer wg.Done()
+	// init goroutine pool
+	pool, err := ants.NewPoolWithFunc(conf.CoreConf.Server.Workers, func(payload interface{}) {
+		batch := payload.([]PacketData)
+		for _, pkt := range batch {
+			packet := gopacket.NewPacket(pkt.Data, layers.LayerTypeEthernet, gopacket.DecodeOptions{
+				Lazy:   false,
+				NoCopy: false,
+			})
+			if packet == nil {
+				return
+			}
+			packet.Metadata().CaptureLength = len(pkt.Data)
+			packet.Metadata().Length = len(pkt.Data)
+
+			var ipStr, dstIP, protocol, dstPort string
+			if ipLayer := packet.Layer(layers.LayerTypeIPv4); ipLayer != nil {
+				ip := ipLayer.(*layers.IPv4)
+				ipStr = ip.SrcIP.String()
+				dstIP = ip.DstIP.String()
+			} else {
+				return
+			}
+			if tcpLayer := packet.Layer(layers.LayerTypeTCP); tcpLayer != nil {
+				tcp := tcpLayer.(*layers.TCP)
+				protocol = "TCP"
+				dstPort = tcp.DstPort.String()
+			} else if udpLayer := packet.Layer(layers.LayerTypeUDP); udpLayer != nil {
+				udp := udpLayer.(*layers.UDP)
+				protocol = "UDP"
+				dstPort = udp.DstPort.String()
+			} else {
+				return
+			}
+			if !utils.IsValidIP(ipStr) || !utils.IsValidIP(dstIP) {
+				return
+			}
+			packetLen := int64(packet.Metadata().Length)
+			stats := syncPool.Get().(*Traffic)
+			*stats = Traffic{
+				Timestamp: pkt.Timestamp,
+				SrcIP:     ipStr,
+				DstIP:     dstIP,
+				DstPort:   dstPort,
+				Protocol:  protocol,
+				Bytes:     float64(packetLen),
+				Requests:  1,
+			}
+			copied := *stats
+			syncPool.Put(stats)
+			if conf.CoreConf.Kafka.Enable {
+				msg, _ := json.Marshal(copied)
+				kafka.Push(msg)
+			}
+			w.Add(copied)
+		}
+	}, ants.WithMaxBlockingTasks(conf.CoreConf.Server.Workers*20))
 	if err != nil {
-		notSpecified := strings.Contains(err.Error(), "not been specified")
-		errEth := strings.Contains(err.Error(), "Error opening adapter")
-		notFound := strings.Contains(err.Error(), "No such device exists")
-		if notFound || errEth || notSpecified {
-			fmt.Printf("网卡 %s 不存在或无法打开，请检查配置文件中的网卡名称是否正确。\n", device)
-			fmt.Printf("可用网卡列表：\n")
-			utils.ListAvailableDevices()
-			os.Exit(1)
-		}
-		panic(err)
+		log.Fatalf("Failed to create goroutine pool: %v", err)
 	}
-	defer handle.Close()
+	defer pool.Release()
 
-	if err = handle.SetBPFFilter("tcp or udp"); err != nil {
-		panic(err)
+	tPacket, err := afpacket.NewTPacket(
+		afpacket.OptInterface(device),
+		afpacket.OptFrameSize(65536),
+		afpacket.OptBlockSize(1<<22),
+		afpacket.OptNumBlocks(64),
+		afpacket.OptPollTimeout(100*time.Millisecond),
+		afpacket.OptTPacketVersion(afpacket.TPacketVersion3),
+	)
+	if err != nil {
+		log.Fatalf("Failed to create TPACKET_V3: %v", err)
 	}
-	packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
-	ticker := time.NewTicker(time.Minute)
-	defer func() {
-		ticker.Stop()
-		pool.Wg.Done()
+
+	// monitor drop packets and send big bandwidth and high frequency alerts
+	go func() {
+		var monitorTicker = time.NewTicker(time.Minute)
+		defer monitorTicker.Stop()
+		for {
+			select {
+			case <-utils.Ctx.Done():
+				return
+			case <-monitorTicker.C:
+				// monitor dropped packets
+				count := atomic.SwapInt64(&counter, 0)
+				if count != 0 {
+					zlog.Infof("COUNT", "Dropped packets: %d", count)
+				}
+				if !conf.CoreConf.Notify.Enable {
+					continue
+				}
+				// alert notification for Big Bandwidth and High Frequency
+				now := time.Now().Format(utils.TimeLayout)
+				var (
+					bws []notify.Bandwidth
+					fqs []notify.Frequency
+				)
+				thresholdBytes := getThresholdBytes()
+				w.cacheMu.RLock()
+				for _, s := range w.ipCache {
+					bytes := s.Bytes * getUnitFactor(s.Unit)
+					if bytes > thresholdBytes && !notify.IsWhiteIp(s.IP) {
+						bws = append(bws, notify.Bandwidth{
+							IP:        s.IP,
+							Bandwidth: fmt.Sprintf("%.2f%s", s.Bytes, s.Unit),
+						})
+					}
+				}
+				if len(bws) != 0 {
+					notify.Push(notify.DdosAlert{
+						BandwidthS: bws,
+						Timestamp:  now,
+						Title:      highBandwidth,
+						Location:   conf.CoreConf.Notify.Location,
+						TimeRange:  utils.GetTimeRangeString(conf.CoreConf.Server.Size),
+					})
+				}
+				w.cacheMu.RUnlock()
+
+				frequencyThreshold := conf.CoreConf.Notify.FrequencyThreshold
+				w.freqStatsMu.RLock()
+				for srcIP, dstIPs := range w.srcToDstStats {
+					if len(dstIPs) > frequencyThreshold && !notify.IsWhiteIp(srcIP) {
+						fqs = append(fqs, notify.Frequency{
+							IP:    srcIP,
+							Count: len(dstIPs),
+							Desc:  fmt.Sprintf("检测到源IP %s 在最近1分钟内尝试连接 %d 个不同目标 IP，疑似异常行为", srcIP, len(dstIPs)),
+						})
+					}
+				}
+				for dstIP, srcIPs := range w.dstToSrcStats {
+					if len(srcIPs) > frequencyThreshold && !notify.IsWhiteIp(dstIP) {
+						fqs = append(fqs, notify.Frequency{
+							IP:    dstIP,
+							Count: len(srcIPs),
+							Desc:  fmt.Sprintf("检测到目标IP %s 在最近1分钟内接收来自 %d 个不同源IP访问请求，疑似异常行为", dstIP, len(srcIPs)),
+						})
+					}
+				}
+				if len(fqs) != 0 {
+					notify.Push(notify.DdosAlert{
+						FrequencyS: fqs,
+						Timestamp:  now,
+						Title:      highFrequency,
+						Location:   conf.CoreConf.Notify.Location,
+						TimeRange:  utils.GetTimeRangeString(1),
+					})
+				}
+				w.freqStatsMu.RUnlock()
+			}
+		}
 	}()
-	for {
-		select {
-		case packet := <-packetSource.Packets():
-			pool.Add(func(args ...interface{}) error {
-				pt := args[0].(gopacket.Packet)
-				var ipStr, dstIP, protocol string
-				var dstPort string
-				if ipLayer := pt.Layer(layers.LayerTypeIPv4); ipLayer != nil {
-					ip, _ := ipLayer.(*layers.IPv4)
-					ipStr = ip.SrcIP.String()
-					dstIP = ip.DstIP.String()
-				} else {
-					return nil
-				}
-				if tcpLayer := pt.Layer(layers.LayerTypeTCP); tcpLayer != nil {
-					tcp, _ := tcpLayer.(*layers.TCP)
-					protocol = "TCP"
-					dstPort = tcp.DstPort.String()
-				} else if udpLayer := pt.Layer(layers.LayerTypeUDP); udpLayer != nil {
-					udp, _ := udpLayer.(*layers.UDP)
-					protocol = "UDP"
-					dstPort = udp.DstPort.String()
-				} else {
-					return nil
-				}
-				if !utils.IsValidIP(ipStr) || !utils.IsValidIP(dstIP) {
-					return nil
-				}
-				packetLen := int64(pt.Metadata().Length)
-				stats := syncPool.Get().(*Traffic)
-				*stats = Traffic{
-					Timestamp: pt.Metadata().Timestamp,
-					SrcIP:     ipStr,
-					DstIP:     dstIP,
-					DstPort:   dstPort,
-					Protocol:  protocol,
-					Bytes:     float64(packetLen),
-					Requests:  1,
-				}
-				copied := *stats
-				syncPool.Put(stats)
-				if conf.CoreConf.Kafka.Enable {
-					msg, _ := json.Marshal(copied)
-					kafka.Push(msg)
-				}
-				w.Add(copied)
-				return nil
-			}, packet)
-		case <-ticker.C:
-			now := time.Now().Format(utils.TimeLayout)
-			var (
-				bws []notify.Bandwidth
-				fqs []notify.Frequency
-			)
-			thresholdBytes := getThresholdBytes()
-			w.cacheMu.RLock()
-			for _, s := range w.ipCache {
-				bytes := s.Bytes * getUnitFactor(s.Unit)
-				if bytes > thresholdBytes && !notify.IsWhiteIp(s.IP) {
-					bws = append(bws, notify.Bandwidth{
-						IP:        s.IP,
-						Bandwidth: fmt.Sprintf("%.2f%s", s.Bytes, s.Unit),
-					})
-				}
-			}
-			if len(bws) != 0 {
-				notify.Push(notify.DdosAlert{
-					BandwidthS: bws,
-					Timestamp:  now,
-					Title:      highBandwidth,
-					Location:   conf.CoreConf.Notify.Location,
-					TimeRange:  utils.GetTimeRangeString(conf.CoreConf.Server.Size),
-				})
-			}
-			w.cacheMu.RUnlock()
 
-			frequencyThreshold := conf.CoreConf.Notify.FrequencyThreshold
-			w.freqStatsMu.RLock()
-			for srcIP, dstIPs := range w.srcToDstStats {
-				if len(dstIPs) > frequencyThreshold && !notify.IsWhiteIp(srcIP) {
-					fqs = append(fqs, notify.Frequency{
-						IP:    srcIP,
-						Count: len(dstIPs),
-						Desc:  fmt.Sprintf("检测到源IP %s 在最近1分钟内尝试连接 %d 个不同目标 IP，疑似异常行为", srcIP, len(dstIPs)),
-					})
+	// producer
+	producerWg.Add(1)
+	go func() {
+		defer producerWg.Done()
+		defer close(packetChan)
+		packetSource := gopacket.NewPacketSource(tPacket, layers.LayerTypeEthernet)
+		for {
+			select {
+			case <-utils.Ctx.Done():
+				return
+			default:
+				packet, err := packetSource.NextPacket()
+				if err != nil {
+					continue
+				}
+				data := packet.Data()
+				buf := make([]byte, len(data))
+				copy(buf, data)
+
+				select {
+				case packetChan <- PacketData{
+					Data:      buf,
+					Timestamp: packet.Metadata().Timestamp,
+				}:
+				default:
+					atomic.AddInt64(&counter, 1)
 				}
 			}
-			for dstIP, srcIPs := range w.dstToSrcStats {
-				if len(srcIPs) > frequencyThreshold && !notify.IsWhiteIp(dstIP) {
-					fqs = append(fqs, notify.Frequency{
-						IP:    dstIP,
-						Count: len(srcIPs),
-						Desc:  fmt.Sprintf("检测到目标IP %s 在最近1分钟内接收来自 %d 个不同源IP访问请求，疑似异常行为", dstIP, len(srcIPs)),
-					})
-				}
-			}
-			if len(fqs) != 0 {
-				notify.Push(notify.DdosAlert{
-					FrequencyS: fqs,
-					Timestamp:  now,
-					Title:      highFrequency,
-					Location:   conf.CoreConf.Notify.Location,
-					TimeRange:  utils.GetTimeRangeString(1),
-				})
-			}
-			w.freqStatsMu.RUnlock()
-		case <-utils.Ctx.Done():
-			return
 		}
+	}()
+
+	// consumer
+	// use goroutine pool to process packets in batches
+	for i := 0; i < numConsumers; i++ {
+		consumerWg.Add(1)
+		go func() {
+			defer consumerWg.Done()
+			batch := make([]PacketData, 0, batchSize)
+			ticker := time.NewTicker(2 * time.Millisecond)
+			defer ticker.Stop()
+			for {
+				select {
+				case pkt, ok := <-packetChan:
+					if !ok {
+						if len(batch) > 0 {
+							copyBatch := append([]PacketData{}, batch...)
+							_ = pool.Invoke(copyBatch)
+						}
+						return
+					}
+					batch = append(batch, pkt)
+					if len(batch) >= batchSize {
+						copyBatch := append([]PacketData{}, batch...)
+						_ = pool.Invoke(copyBatch)
+						batch = batch[:0]
+					}
+				case <-ticker.C:
+					if len(batch) > 0 {
+						copyBatch := append([]PacketData{}, batch...)
+						_ = pool.Invoke(copyBatch)
+						batch = batch[:0]
+					}
+				case <-utils.Ctx.Done():
+					return
+				}
+			}
+		}()
 	}
+
+	producerWg.Wait()
+	consumerWg.Wait()
+
+	tPacket.Close()
 }
 
 func (w *Window) ServeHTTP(wr http.ResponseWriter, r *http.Request) {

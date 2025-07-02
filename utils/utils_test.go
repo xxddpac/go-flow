@@ -24,7 +24,3 @@ func TestGetMemUsage(t *testing.T) {
 func TestGetTimeRangeString(t *testing.T) {
 	fmt.Println(GetTimeRangeString(1))
 }
-
-func TestListAvailableDevices(t *testing.T) {
-	ListAvailableDevices()
-}

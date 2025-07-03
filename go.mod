@@ -1,6 +1,6 @@
 module go-flow
 
-go 1.21.4
+go 1.23.0
 
 require (
 	github.com/BurntSushi/toml v1.5.0
@@ -11,7 +11,6 @@ require (
 	github.com/shirou/gopsutil/v3 v3.24.5
 	github.com/spf13/cast v1.9.2
 	go.uber.org/zap v1.27.0
-	golang.org/x/net v0.0.0-20190620200207-3b0461eec859
 	gopkg.in/gomail.v2 v2.0.0-20160411212932-81ebce5c23df
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 )
@@ -38,9 +37,10 @@ require (
 	github.com/tklauser/numcpus v0.6.1 // indirect
 	github.com/yusufpapurcu/wmi v1.2.4 // indirect
 	go.uber.org/multierr v1.10.0 // indirect
-	golang.org/x/crypto v0.0.0-20191011191535-87dc89f01550 // indirect
+	golang.org/x/crypto v0.39.0 // indirect
+	golang.org/x/net v0.41.0 // indirect
 	golang.org/x/sync v0.11.0 // indirect
-	golang.org/x/sys v0.20.0 // indirect
+	golang.org/x/sys v0.33.0 // indirect
 	gopkg.in/alexcesaro/quotedprintable.v3 v3.0.0-20150716171945-2caba252f4dc // indirect
 	gopkg.in/jcmturner/aescts.v1 v1.0.1 // indirect
 	gopkg.in/jcmturner/dnsutils.v1 v1.0.1 // indirect

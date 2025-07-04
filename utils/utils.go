@@ -16,12 +16,14 @@ const (
 )
 
 var (
-	Ctx    context.Context
-	Cancel context.CancelFunc
+	Ctx         context.Context
+	Cancel      context.CancelFunc
+	LocalIpAddr string
 )
 
 func init() {
 	Ctx, Cancel = context.WithCancel(context.Background())
+	LocalIpAddr = GetLocalIp()
 }
 
 func GetTimeRangeString(minutes int) string {

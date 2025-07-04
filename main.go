@@ -50,14 +50,14 @@ func main() {
 	go flow.Capture(conf.CoreConf.Server.Eth, window, &wg)
 	go func() {
 		pprofPort := conf.CoreConf.Server.Port - 1
-		zlog.Infof("Main", "Starting pprof on http://localhost:%d/debug/pprof/", pprofPort)
+		zlog.Infof("Main", "Starting pprof on http://%s:%d/debug/pprof/", utils.LocalIpAddr, pprofPort)
 		if err := http.ListenAndServe(fmt.Sprintf(":%d", pprofPort), nil); err != nil {
 			zlog.Errorf("Main", "pprof ListenAndServe Error %s", err.Error())
 		}
 	}()
 	go func() {
-		log.Printf("Starting HTTP server on http://localhost%s\n", server.Addr)
-		zlog.Infof("Main", "Starting HTTP server on http://localhost%s", server.Addr)
+		log.Printf("Starting HTTP server on http://%s%s\n", utils.LocalIpAddr, server.Addr)
+		zlog.Infof("Main", "Starting HTTP server on http://%s%s", utils.LocalIpAddr, server.Addr)
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			zlog.Errorf("Main", "HTTP server ListenAndServe Error %s", err.Error())
 		}

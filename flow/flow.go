@@ -673,8 +673,13 @@ func Capture(device string, w *Window, wg *sync.WaitGroup) {
 					fqs []notify.Frequency
 				)
 				thresholdBytes := getThresholdBytes()
+				var snapshot []IPTraffic
+
 				w.cacheMu.RLock()
-				for _, s := range w.ipCache {
+				snapshot = append([]IPTraffic(nil), w.ipCache...)
+				w.cacheMu.RUnlock()
+
+				for _, s := range snapshot {
 					bytes := s.Bytes * getUnitFactor(s.Unit)
 					if bytes > thresholdBytes && !notify.IsWhiteIp(s.IP) {
 						bws = append(bws, notify.Bandwidth{
@@ -692,11 +697,29 @@ func Capture(device string, w *Window, wg *sync.WaitGroup) {
 						TimeRange:  utils.GetTimeRangeString(conf.CoreConf.Server.Size),
 					})
 				}
-				w.cacheMu.RUnlock()
 
 				frequencyThreshold := conf.CoreConf.Notify.FrequencyThreshold
+
 				w.freqStatsMu.RLock()
-				for srcIP, dstIPs := range w.srcToDstStats {
+				srcCopy := make(map[string]map[string]bool, len(w.srcToDstStats))
+				for src, dstMap := range w.srcToDstStats {
+					dstCopy := make(map[string]bool, len(dstMap))
+					for dst := range dstMap {
+						dstCopy[dst] = true
+					}
+					srcCopy[src] = dstCopy
+				}
+				dstCopy := make(map[string]map[string]bool, len(w.dstToSrcStats))
+				for dst, srcMap := range w.dstToSrcStats {
+					srcS := make(map[string]bool, len(srcMap))
+					for src := range srcMap {
+						srcS[src] = true
+					}
+					dstCopy[dst] = srcS
+				}
+				w.freqStatsMu.RUnlock()
+
+				for srcIP, dstIPs := range srcCopy {
 					if len(dstIPs) > frequencyThreshold && !notify.IsWhiteIp(srcIP) {
 						fqs = append(fqs, notify.Frequency{
 							IP:    srcIP,
@@ -705,7 +728,7 @@ func Capture(device string, w *Window, wg *sync.WaitGroup) {
 						})
 					}
 				}
-				for dstIP, srcIPs := range w.dstToSrcStats {
+				for dstIP, srcIPs := range dstCopy {
 					if len(srcIPs) > frequencyThreshold && !notify.IsWhiteIp(dstIP) {
 						fqs = append(fqs, notify.Frequency{
 							IP:    dstIP,
@@ -723,7 +746,6 @@ func Capture(device string, w *Window, wg *sync.WaitGroup) {
 						TimeRange:  utils.GetTimeRangeString(1),
 					})
 				}
-				w.freqStatsMu.RUnlock()
 			}
 		}
 	}()
@@ -976,7 +998,7 @@ func (w *Window) ServeHTTP(wr http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.URL.Path == "/sys" {
-		response := systemMonitorManager.Get(localIp)
+		response := systemMonitorManager.Get(utils.LocalIpAddr)
 		wr.Header().Set("Content-Type", "application/json")
 		if err := ji.NewEncoder(wr).Encode(response); err != nil {
 			http.Error(wr, "Failed to encode JSON", http.StatusInternalServerError)
@@ -1116,7 +1138,6 @@ type ProtocolCache struct {
 
 var (
 	systemMonitorManager *SystemMonitorManager
-	localIp              = utils.GetLocalIp()
 )
 
 type SystemMonitor struct {
@@ -1157,9 +1178,9 @@ func (s *SystemMonitorManager) run() {
 	for {
 		select {
 		case <-ticker.C:
-			s.Set(localIp, SystemMonitor{
+			s.Set(utils.LocalIpAddr, SystemMonitor{
 				NetworkInterface: conf.CoreConf.Server.Eth,
-				LocalIp:          localIp,
+				LocalIp:          utils.LocalIpAddr,
 				Cpu:              utils.GetCpuUsage(),
 				Mem:              utils.GetMemUsage(),
 				Workers:          runtime.NumGoroutine(),

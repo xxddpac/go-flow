@@ -53,6 +53,7 @@ type IPTraffic struct {
 	Bytes    float64 `json:"bytes"`
 	Requests int64   `json:"requests"`
 	Unit     string  `json:"unit"`
+	Desc     string  `json:"desc"`
 }
 
 type IPTrafficResponse struct {
@@ -94,6 +95,8 @@ type Window struct {
 	srcToDstStats map[string]map[string]bool
 	dstToSrcStats map[string]map[string]bool
 	freqStatsMu   sync.RWMutex
+	startTime     time.Time
+	endTime       time.Time
 }
 
 func NewWindow(size time.Duration, rank int) *Window {
@@ -203,6 +206,14 @@ func (w *Window) Add(traffic Traffic) {
 	if bucket.Timestamp != bucketTs {
 		bucket.Timestamp = bucketTs
 		bucket.Stats = make(map[string]Traffic)
+
+		if w.startTime.IsZero() || bucketTs < w.startTime.Unix() {
+			w.startTime = time.Unix(bucketTs, 0)
+		}
+		if time.Unix(bucketTs, 0).After(w.endTime) {
+			w.endTime = time.Unix(bucketTs, 0)
+		}
+
 		w.freqStatsMu.Lock()
 		for srcIP := range w.srcToDstStats {
 			w.srcToDstStats[srcIP] = make(map[string]bool)
@@ -861,6 +872,7 @@ func (w *Window) ServeHTTP(wr http.ResponseWriter, r *http.Request) {
 					Bandwidth: s.Bytes,
 					Unit:      s.Unit,
 					Requests:  s.Requests,
+					Desc:      fmt.Sprintf("%v%v", fmt.Sprintf("%0.2f", s.Bytes)+s.Unit, w.Mbps(s.Bytes, s.Unit)),
 				})
 			}
 		}
@@ -914,6 +926,7 @@ func (w *Window) ServeHTTP(wr http.ResponseWriter, r *http.Request) {
 					Unit:     s.Unit,
 					Requests: s.Requests,
 					Bytes:    s.Bytes,
+					Desc:     fmt.Sprintf("%v%v", fmt.Sprintf("%0.2f", s.Bytes)+s.Unit, w.Mbps(s.Bytes, s.Unit)),
 				})
 			}
 		}
@@ -1092,6 +1105,7 @@ type TopItem struct {
 	Bandwidth float64 `json:"bandwidth"`
 	Unit      string  `json:"unit"`
 	Requests  int64   `json:"requests"`
+	Desc      string  `json:"desc"`
 }
 
 type TopResponse struct {
@@ -1189,4 +1203,25 @@ func (s *SystemMonitorManager) run() {
 			return
 		}
 	}
+}
+
+func (w *Window) Mbps(bytes float64, unit string) string {
+	duration := w.endTime.Sub(w.startTime)
+	if duration <= 0 {
+		return ""
+	}
+	if duration > w.size {
+		duration = w.size
+	}
+	var bits float64
+	switch unit {
+	case "MB":
+		bits = bytes * 8 * 1_000_000
+	case "GB":
+		bits = bytes * 8 * 1_000_000_000
+	default:
+		return ""
+	}
+	mbps := bits / duration.Seconds() / 1_000_000
+	return fmt.Sprintf("  ( %.2fMbps )", mbps)
 }

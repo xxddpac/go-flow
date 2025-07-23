@@ -205,9 +205,9 @@
                         const validData = dataArray.filter(item => {
                             let isValid;
                             if (tab === 'traffic') {
-                                isValid = item.src_ip && item.dest_ip && item.dest_port !== undefined && item.protocol && item.bandwidth !== undefined && item.unit && item.requests !== undefined;
+                                isValid = item.src_ip && item.dest_ip && item.dest_port !== undefined && item.protocol && item.bandwidth !== undefined && item.unit && item.requests !== undefined && item.desc;
                             } else if (tab === 'ip') {
-                                isValid = item.ip && item.bytes !== undefined && item.requests !== undefined && item.unit;
+                                isValid = item.ip && item.bytes !== undefined && item.requests !== undefined && item.unit && item.desc;
                             } else {
                                 isValid = item.dest_port && item.protocol && item.bytes !== undefined && item.unit;
                             }
@@ -598,14 +598,14 @@
                             <td className="py-2 px-4 border">{item.dest_ip || 'N/A'}</td>
                             <td className="py-2 px-4 border">{item.dest_port !== undefined ? item.dest_port : 'N/A'}</td>
                             <td className="py-2 px-4 border">{item.protocol || 'N/A'}</td>
-                            <td className="py-2 px-4 border">{item.bandwidth !== undefined ? item.bandwidth.toFixed(2) + ' ' + (item.unit || 'N/A') : 'N/A'}</td>
+                            <td className="py-2 px-4 border">{item.desc || 'N/A'}</td>
                             <td className="py-2 px-4 border">{item.requests !== undefined ? item.requests : 'N/A'}</td>
                         </>
                     )}
                     {tab === 'ip' && (
                         <>
                             <td className="py-2 px-4 border">{item.ip || 'N/A'}</td>
-                            <td className="py-2 px-4 border">{item.bytes !== undefined ? item.bytes.toFixed(2) + ' ' + (item.unit || 'N/A') : 'N/A'}</td>
+                            <td className="py-2 px-4 border">{item.desc || 'N/A'}</td>
                             <td className="py-2 px-4 border">{item.requests !== undefined ? item.requests : 'N/A'}</td>
                         </>
                     )}
